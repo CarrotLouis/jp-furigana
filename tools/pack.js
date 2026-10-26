@@ -30,6 +30,9 @@ const SRC_FILES = [
 	'manifest.json',
 	'main.js',
 	'furigana.js',
+	'external-core.js',
+	'external.js',
+	'external-fetch.ps1',
 	'kuromoji.js',
 	'preview.jpg',
 	// kuromoji 和 IPADIC 的许可要求随附声明，所以这三个也得进包

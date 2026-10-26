@@ -6,12 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-# 检查 + 打包；main 上如果 manifest 里的版本还没发过 release，就自动发一个
+# 检查 + 打包，生成可下载 artifact；发布正式 Release 单独处理。
 jobs:
   test:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 建 release 用
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,7 +23,7 @@ jobs:
 
       - name: 语法检查
         run: |
-          for f in src/main.js src/furigana.js src/kuromoji.js tools/*.js; do
+          for f in src/*.js tools/*.js tools/*.cjs tests/*.cjs; do
             echo "checking $f"
             node --check "$f"
           done
@@ -48,11 +48,11 @@ jobs:
           console.log('预览图 '+kb.toFixed(0)+' KB, 元信息与外链检查通过');
           "
 
-      - name: 注音逻辑 (词典)
-        run: node tools/test-furigana.js
+      - name: 安装测试依赖
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: 注音逻辑 (官方音译对齐 + 2.x nbsp)
-        run: node tools/test-romaji.js
+      - name: 注音逻辑、外部来源、缓存与漏注音回归
+        run: npm test
 
       # fixture 含整首歌词没有入库，这一步在 CI 上会自动 SKIP
       - name: 接口链路 (缺 fixture 则跳过)
@@ -61,7 +61,6 @@ jobs:
       # RefinedNowPlaying 的逐字歌词 DOM，用 jsdom 模拟着跑一遍
       - name: 第三方歌词插件兼容 (RNP / LyricBar 逐字)
         run: |
-          npm i jsdom --no-save --silent
           node tools/test-rnp-dom.js
           node tools/test-rnp-dom.js slide
           node tools/test-rnp-dom.js float noruby
@@ -84,28 +83,9 @@ jobs:
           fi
           echo "产物校验通过"
 
-      # 版本号发过就跳过，所以合到 main 但没 bump 版本时不会重复发
-      - name: 发布 Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=$(node -p "require('./src/manifest.json').version")
-          tag="v$version"
-          if gh release view "$tag" > /dev/null 2>&1; then
-            echo "$tag 已经发过了，跳过"
-            exit 0
-          fi
-
-          # 说明就是上一个 release 之后的提交；没有上一个 release 就把历史全列出来
-          notes="$RUNNER_TEMP/release-notes.md"
-          prev=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' || true)
-          if [ -n "$prev" ] && git rev-parse -q --verify "refs/tags/$prev" > /dev/null; then
-            echo "上一个 release: $prev"
-            git log --no-merges --pretty='- %s' "$prev..HEAD" > "$notes"
-          else
-            git log --no-merges --pretty='- %s' > "$notes"
-          fi
-          cat "$notes"
-
-          gh release create "$tag" builds/jp-furigana.plugin --title "$version" --notes-file "$notes"
+      - name: 上传插件包
+        uses: actions/upload-artifact@v4
+        with:
+          name: jp-furigana-plugin
+          path: builds/jp-furigana.plugin
+          if-no-files-found: error

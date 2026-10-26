@@ -13,11 +13,11 @@
 
 	const LOG = '[jp-furigana]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'karaoke-15';
-	const REPO_URL = 'https://github.com/Leleawa/jp-furigana';
+	const BUILD = 'external-lyrics-2';
+	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
-	const CACHE_KEY = 'jp-furigana.cache.v3';
+	const CACHE_KEY = 'jp-furigana.cache.v4';
 	const CACHE_LIMIT = 4000;
 
 	const DEFAULTS = {
@@ -25,6 +25,10 @@
 		kana: 'hiragana', // hiragana | katakana
 		// romaji = 优先用网易云接口给的官方音译，拿不到或对不齐才退回词典；dict = 只用词典
 		readingSource: 'romaji',
+		externalProvider: 'auto', // UtaTen first, then Uta-Net
+		externalProxyEnabled: false,
+		externalProxy: '',
+		externalCacheDir: '', // default: <BetterNCM data>/lyrics/jp-furigana
 		rtSize: 60, // rt 相对底字的百分比
 		rtOpacity: 80, // rt 不透明度百分比
 		karaoke: true, // 逐字歌词：把注音按字符偏移分发到内部的 span，保留逐字动画
@@ -150,6 +154,8 @@
 		apiTrackId: null,
 		apiRomaji: null, // Map: 歌词原文 -> 官方音译
 		apiStatus: '未请求',
+		externalTrackId: null,
+		externalForce: false,
 		tokenizer: null,
 		loading: false,
 		loadError: null,
@@ -170,6 +176,7 @@
 	/** 原文行 -> 注音片段。内存 Map + localStorage 持久化。 */
 	const cache = new Map();
 	try {
+		localStorage.removeItem('jp-furigana.cache.v3'); // obsolete results could include missing readings
 		const raw = JSON.parse(localStorage.getItem(CACHE_KEY));
 		if (raw && typeof raw === 'object')
 			for (const k of Object.keys(raw)) cache.set(k, raw[k]);
@@ -215,7 +222,7 @@
 		const key = 'd|' + config.kana + '|' + text;
 		const hit = cache.get(key);
 		if (hit) return hit;
-		const segs = FuriganaCore.tokensToSegments(state.tokenizer.tokenize(text), {
+		const segs = FuriganaCore.tokensToSegments(FuriganaCore.tokenizeForReading(state.tokenizer, text), {
 			kana: config.kana,
 		});
 		cache.set(key, segs);
@@ -385,7 +392,7 @@
 
 	/** 换歌了就异步拉一次音译；查表是按歌词文本，所以就算 id 拿错了也只是查不到 */
 	function ensureApiRomaji() {
-		if (config.readingSource !== 'romaji') return;
+		if (config.readingSource !== 'romaji' && config.readingSource !== 'external') return;
 		const id = getCurrentTrackId();
 		if (!id || id === state.apiTrackId) return;
 
@@ -409,6 +416,54 @@
 				notifyConfigUI();
 			}
 		);
+	}
+
+	// ------------------------------------------------------ 外部网站（按需联网）
+	let externalClient = null;
+	function getExternalClient() {
+		if (!externalClient && typeof FuriganaExternal !== 'undefined') {
+			externalClient = FuriganaExternal.create({
+				...FuriganaExternal.browserTransport(betterncm, plugin),
+				onReady: () => { invalidateAll(); schedule(0); notifyConfigUI(); },
+				onStatus: () => notifyConfigUI(),
+			});
+		}
+		return externalClient;
+	}
+	async function currentTrackMetadata(id) {
+		try {
+			const p = state.store && state.store.getState().playing;
+			for (const t of p ? [p.curTrack, p.playingTrack, p.track, p.resourceTrack] : []) {
+				if (!t || String(t.id || t.trackId) !== id || !t.name) continue;
+				const artists = (t.ar || t.artists || []).map(a => a.name).filter(Boolean);
+				if (artists.length) return { title: t.name, artists };
+			}
+		} catch (_) { /* Fall back to the official song detail endpoint. */ }
+		const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 8000);
+		try {
+			const url = 'https://music.163.com/api/song/detail/?id=' + encodeURIComponent(id) + '&ids=' + encodeURIComponent('[' + id + ']');
+			const response = await fetch(url, { signal: abort.signal });
+			if (!response.ok) throw new Error('歌曲信息 HTTP ' + response.status);
+			const data = await response.json();
+			const t = (data.songs || []).find(song => String(song.id) === id);
+			if (!t) throw new Error('未获取到当前歌曲信息');
+			return { title: t.name, artists: (t.ar || t.artists || []).map(a => a.name).filter(Boolean) };
+		} finally { clearTimeout(timer); }
+	}
+	function resetExternal() {
+		state.externalTrackId = null;
+		if (externalClient) externalClient.stop();
+	}
+	function ensureExternal() {
+		if (config.readingSource !== 'external') return;
+		const id = getCurrentTrackId();
+		if (!id || id === state.externalTrackId) return;
+		const client = getExternalClient();
+		if (!client) return;
+		state.externalTrackId = id;
+		invalidateAll();
+		const force = state.externalForce; state.externalForce = false;
+		client.load(id, () => currentTrackMetadata(id), config, force);
 	}
 
 	// ------------------------------------------------------------------ 文本工具
@@ -856,7 +911,11 @@
 		// 音译只认接口来源，和歌词页上「音」的开关无关；拿不到或对不齐才退回词典。
 		let segments = null;
 		let source = 'dict';
-		if (config.readingSource === 'romaji' && state.apiRomaji) {
+		if (config.readingSource === 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) {
+			segments = externalClient.segments(text, config.kana, getSegmentsFromRomaji);
+			if (segments) source = 'external';
+		}
+		if (!segments && (config.readingSource === 'romaji' || config.readingSource === 'external') && state.apiRomaji) {
 			const romaji = state.apiRomaji.get(FuriganaCore.lyricKey(text));
 			if (romaji) {
 				segments = getSegmentsFromRomaji(text, romaji);
@@ -951,6 +1010,7 @@
 				state.annotated = 0;
 				return;
 			}
+			ensureExternal();
 
 			// 这一轮不在列表里的行，把改动撤掉
 			const set = new Set(lines);
@@ -991,6 +1051,7 @@
 			state.annotated = annotated;
 			state.srcRomaji = lines.filter((l) => l.__fgSource === 'romaji').length;
 			state.srcDict = lines.filter((l) => l.__fgSource === 'dict').length;
+			state.srcExternal = lines.filter((l) => l.__fgSource === 'external').length;
 			lastLines = lines;
 		} finally {
 			// MutationObserver 的回调在本次同步任务结束后才跑，光靠 applying 标志挡不住
@@ -1543,6 +1604,7 @@
 
 	function disable() {
 		config.enabled = false;
+		resetExternal();
 		saveConfig();
 		removeAll(lastLines);
 		lastLines = [];
@@ -1556,6 +1618,7 @@
 	}
 
 	function rescan() {
+		resetExternal();
 		state.container = null;
 		state.apiTrackId = null; // 重新拉一次官方音译
 		state.apiRomaji = null;
@@ -1612,6 +1675,8 @@
 				#jp-furigana-config .fg-links a { text-decoration: underline; cursor: pointer; opacity: .85; }
 				#jp-furigana-config .fg-links a:hover { opacity: 1; }
 				#jp-furigana-config input[type="text"] { width: 320px; }
+				#jp-furigana-config .fg-external-settings[hidden] { display: none !important; }
+				#jp-furigana-config .fg-external-error { color: #e67e73; font-size: 12px; }
 				#jp-furigana-config .fg-preview {
 					font-size: 26px; padding: 14px 16px; margin: 8px 0;
 					border-radius: 10px; background: rgba(127,127,127,.12);
@@ -1640,8 +1705,26 @@
 				<select data-k="readingSource">
 					<option value="romaji">优先用网易云音译（推荐）</option>
 					<option value="dict">只用词典</option>
+					<option value="external">外部网站</option>
 				</select>
 			</div>
+			<section class="fg-external-settings">
+				<h3>外部歌词</h3>
+				<div class="fg-row"><label>网站顺序</label><select data-k="externalProvider">
+					<option value="auto">UtaTen 优先，歌ネット备用（推荐）</option>
+					<option value="utaten">只用 UtaTen 振假名</option>
+					<option value="utanet">只用歌ネット罗马音</option>
+				</select></div>
+				<div class="fg-row"><label><input type="checkbox" data-k="externalProxyEnabled"> 使用代理获取外部歌词</label></div>
+				<div class="fg-row"><label>代理地址</label><input type="text" data-k="externalProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false"></div>
+				<div class="fg-hint">支持 HTTP / HTTPS / SOCKS5 / SOCKS5H；仅影响外部歌词网站，不改变网易云联网方式。不支持带账号密码的代理 URL。</div>
+				<div class="fg-row"><label>歌词缓存目录</label><input type="text" data-k="externalCacheDir" placeholder="留空：BetterNCM 数据目录 / lyrics / jp-furigana" spellcheck="false"></div>
+				<div class="fg-hint">可填写完整磁盘路径。每首歌曲一个 JSON 文件，包含网站歌词、读音和来源；更改目录后旧文件保留。</div>
+				<div class="fg-hint">加载期间沿用网易云音译 / 词典；只替换能核对原文的注音，保留原歌词和时间轴。网站注音也可能有错。</div>
+				<div class="fg-external-error" role="alert"></div>
+				<div class="fg-external-status" role="status" style="white-space:pre-wrap;font-size:12px;margin:8px 0"></div>
+				<div class="fg-row"><button data-a="externalRetry">重新获取当前歌曲</button><button data-a="externalSource">查看来源网页</button></div>
+			</section>
 			<div class="fg-row">
 				<label>注音大小</label>
 				<input type="range" data-k="rtSize" min="20" max="100" step="1">
@@ -1678,6 +1761,13 @@
 		}
 
 		function refreshStatus() {
+			const section = root.querySelector('.fg-external-settings');
+			section.hidden = config.readingSource !== 'external';
+			const info = externalClient && externalClient.inspect();
+			root.querySelector('.fg-external-status').textContent = (info ? info.status : '等待播放日语歌曲…') +
+				(info && info.cachePath ? '\n缓存目录：' + info.cachePath : '') +
+				(info && info.source ? '\n当前已匹配：' + (state.srcExternal || 0) + ' 行；未匹配行继续回退' : '');
+			root.querySelector('[data-a="externalSource"]').disabled = !(info && info.url);
 			if (!status) return; // 非开发模式没有这块
 			status.textContent = [
 				`词典：${state.tokenizer ? '已就绪' : state.loadError ? '失败 ' + state.loadError : '加载中'}`,
@@ -1696,6 +1786,10 @@
 		const NEEDS_RESCAN = [
 			'kana',
 			'readingSource',
+			'externalProvider',
+			'externalProxyEnabled',
+			'externalProxy',
+			'externalCacheDir',
 			'karaoke',
 			'onlyFirstLine',
 			'skipCredits',
@@ -1710,6 +1804,12 @@
 			else el.value = config[key];
 
 			const commit = () => {
+				const error = root.querySelector('.fg-external-error');
+				error.textContent = '';
+				if (key === 'externalProxy') {
+					try { el.value = FuriganaExternal.validateProxy(el.value); }
+					catch (e) { error.textContent = e.message; return; }
+				}
 				config[key] = el.type === 'checkbox' ? el.checked : el.value;
 				if (el.type === 'range') config[key] = Number(el.value);
 				saveConfig();
@@ -1747,6 +1847,14 @@
 			const el = root.querySelector(`[data-a="${action}"]`);
 			if (el) el.onclick = handler;
 		};
+		onClick('externalRetry', () => {
+			state.externalForce = true;
+			resetExternal(); invalidateAll(); schedule(0);
+		});
+		onClick('externalSource', () => {
+			const info = externalClient && externalClient.inspect();
+			if (info && FuriganaExternalCore.allowedURL(info.url)) betterncm.ncm.openUrl(info.url);
+		});
 		onClick('rescan', () => {
 			rescan();
 			setTimeout(refreshStatus, 500);
@@ -1830,6 +1938,7 @@
 			segments: (text) => (state.tokenizer ? getSegments(text) : null),
 			trackId: getCurrentTrackId,
 			romajiMap: () => state.apiRomaji,
+			externalStatus: () => externalClient && externalClient.inspect(),
 			refetchRomaji: () => {
 				state.apiTrackId = null;
 				state.apiRomaji = null;
