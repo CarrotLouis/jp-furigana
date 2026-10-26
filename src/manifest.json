@@ -3,7 +3,7 @@
 	"manifest_version": 1,
 	"name": "日语歌词振假名",
 	"slug": "jp-furigana",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"author": "leleawa / CarrotLouis",
 	"author_link": "https://github.com/CarrotLouis/jp-furigana",
 	"description": "日语歌词振假名：网易云音译、离线词典、外部网站；支持本地歌词缓存与代理",

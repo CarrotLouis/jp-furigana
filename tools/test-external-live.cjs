@@ -5,6 +5,7 @@ const fs = require('node:fs/promises'), path = require('node:path'), assert = re
 const { spawn } = require('node:child_process'), net = require('node:net');
 const { JSDOM } = require('jsdom');
 const core = require('../src/external-core.js'), clientModule = require('../src/external.js');
+const screenshot = require('../tests/fixtures/utaten-confusions.cjs');
 const privateRoot = path.resolve(__dirname, '../tests/private');
 const activeChildren = new Set(), sockets = new Set();
 let count = 0;
@@ -51,10 +52,17 @@ async function testProviders() {
 		if (provider === 'utaten' && track.id === tracks[0].id) {
 			const segs = client.segments('凜と蒼く 別離の詩を 戀人を射ち墮とす', 'hiragana');
 			assert(segs && segs.some(s => s.text === '戀人' && s.rt === 'あなた'), 'User-provided traditional text should align to the website ruby');
+			const corrected = client.segments(screenshot.target, 'hiragana');
+			assert(corrected && corrected.map(s => s.text).join('') === screenshot.target);
+			assert(corrected.some(s => s.text === '沖動' && s.rt === 'しょうどう'));
+			assert(corrected.some(s => s.text === '暗' && s.rt === 'やみ'));
 		}
 		const ms = Math.round(performance.now() - start), before = count, cacheStart = performance.now();
 		await client.load(track.id, () => { throw new Error('Cached songs should not need metadata'); }, { externalProvider: provider });
 		assert.equal(count, before);
+		if (provider === 'utaten' && track.id === tracks[0].id) {
+			assert(client.segments(screenshot.target, 'hiragana').some(s => s.text === '暗' && s.rt === 'やみ'), 'Existing schema-1 caches use the repaired matching too');
+		}
 		report.push({ provider, title: track.title, milliseconds: ms, cacheMilliseconds: Math.round(performance.now() - cacheStart), cacheNetworkRequests: count - before });
 	}
 	return report;

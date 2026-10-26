@@ -5,15 +5,19 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
 	'use strict';
 	const VARIANTS = { 戀: '恋', 凜: '凛', 墮: '堕', 體: '体', 聲: '声', 會: '会', 變: '変', 歸: '帰', 萬: '万', 盡: '尽', 驅: '駆' };
+	// Only compare lyrics this way: preserve original glyphs/offsets, and do not
+	// rewrite search titles such as 廻廻奇譚 or broaden song/artist verification.
+	const LYRIC_VARIANTS = { ...VARIANTS,
+		彈: '弾', 焰: '焔', 廻: '回', 涂: '塗', 傳: '伝', 說: '説', 咒: '呪', 駈: '駆', 溯: '遡', 淚: '涙', 絕: '絶', 冲: '衝' };
 	const kana = (s, mode) => String(s).replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
 		.replace(/[ぁ-ゖ]/g, c => mode === 'katakana' ? String.fromCharCode(c.charCodeAt(0) + 0x60) : c);
-	function indexed(text) {
+	function indexed(text, variants = LYRIC_VARIANTS) {
 		let key = '', positions = [];
 		let offset = 0;
 		for (const char of text) {
 			for (const c of char.normalize('NFKC').toLowerCase()) {
 				if (/[\p{L}\p{N}]/u.test(c)) {
-					const normalized = VARIANTS[c] || c;
+					const normalized = variants[c] || c;
 					key += normalized;
 					for (let i = 0; i < normalized.length; i++) positions.push({ start: offset, end: offset + char.length });
 				}
@@ -22,14 +26,14 @@
 		}
 		return { key, positions };
 	}
-	const key = s => indexed(String(s || '')).key;
+	const key = s => indexed(String(s || ''), VARIANTS).key;
 	function titleKey(s) {
 		// Strip only trailing parenthetical labels, commonly TV/anime or album metadata.
 		return key(String(s || '').replace(/(?:\s*[（(][^()（）]*[）)])+\s*$/, ''));
 	}
 	function queryTitle(s) {
 		return String(s || '').normalize('NFKC').replace(/(?:\s*[（(][^()（）]*[）)])+\s*$/, '')
-			.replace(/[.…]+\s*$/, '').replace(/[戀凜墮體聲會變歸萬盡驅]/g, c => VARIANTS[c]).trim();
+			.replace(/[.…]+\s*$/, '').replace(/./gu, c => VARIANTS[c] || c).trim();
 	}
 	function matches(candidate, track) {
 		return titleKey(candidate.title) === titleKey(track.title) && !!titleKey(track.title) &&
@@ -171,8 +175,23 @@
 		if (cursor < target.length) output.push({ text: target.slice(cursor) });
 		return output;
 	}
+	function contextualMatch(target, source) {
+		// These are transcription confusions, NOT interchangeable kanji. Only accept
+		// a complete, otherwise identical long line from the already verified song.
+		// No edit-distance guesses, insertions/deletions, short fragments or title matching.
+		if (target.length < 10 || target.length !== source.length) return false;
+		let differences = 0;
+		for (let i = 0; i < target.length; i++) {
+			if (target[i] === source[i]) continue;
+			const pair = target[i] + source[i];
+			if (pair !== '暗闇' && pair !== '闇暗' &&
+				!((pair === '沖衝' || pair === '衝沖') && target[i + 1] === '動' && source[i + 1] === '動')) return false;
+			if (++differences > 2) return false;
+		}
+		return differences > 0;
+	}
 	function segmentsFor(target, groups, mode, fromRomaji) {
-		const needle = key(target);
+		const needle = indexed(target).key;
 		if (!needle) return null;
 		let candidates = groups.filter(g => g.key === needle).map(g => ({ g, at: 0 }));
 		if (!candidates.length && needle.length >= 6) {
@@ -181,6 +200,9 @@
 				let at = g.key.indexOf(needle);
 				while (at >= 0) { candidates.push({ g, at }); at = g.key.indexOf(needle, at + 1); }
 			}
+		}
+		if (!candidates.length) {
+			candidates = groups.filter(g => g.segments && contextualMatch(needle, g.key)).map(g => ({ g, at: 0 }));
 		}
 		const versions = new Map();
 		for (const { g, at } of candidates) {

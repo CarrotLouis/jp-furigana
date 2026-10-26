@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'external-lyrics-2';
+	const BUILD = 'external-lyrics-3';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -907,8 +907,8 @@
 			return false;
 		}
 
-		// 优先用官方音译推读音——歌手故意改读的地方（運命→さだめ）只有它是对的。
-		// 音译只认接口来源，和歌词页上「音」的开关无关；拿不到或对不齐才退回词典。
+		// 外部模式先用核对过原文的网站读音；尚未匹配的行才回退到官方音译 / 词典。
+		// 官方音译也可能有误；只认接口来源，和歌词页上「音」的开关无关。
 		let segments = null;
 		let source = 'dict';
 		if (config.readingSource === 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) {
@@ -1710,17 +1710,17 @@
 			</div>
 			<section class="fg-external-settings">
 				<h3>外部歌词</h3>
-				<div class="fg-row"><label>网站顺序</label><select data-k="externalProvider">
+				<div class="fg-row"><label>外部网站范围</label><select data-k="externalProvider">
 					<option value="auto">UtaTen 优先，歌ネット备用（推荐）</option>
-					<option value="utaten">只用 UtaTen 振假名</option>
-					<option value="utanet">只用歌ネット罗马音</option>
+					<option value="utaten">仅查询 UtaTen 振假名</option>
+					<option value="utanet">仅查询歌ネット罗马音</option>
 				</select></div>
 				<div class="fg-row"><label><input type="checkbox" data-k="externalProxyEnabled"> 使用代理获取外部歌词</label></div>
 				<div class="fg-row"><label>代理地址</label><input type="text" data-k="externalProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false"></div>
 				<div class="fg-hint">支持 HTTP / HTTPS / SOCKS5 / SOCKS5H；仅影响外部歌词网站，不改变网易云联网方式。不支持带账号密码的代理 URL。</div>
 				<div class="fg-row"><label>歌词缓存目录</label><input type="text" data-k="externalCacheDir" placeholder="留空：BetterNCM 数据目录 / lyrics / jp-furigana" spellcheck="false"></div>
 				<div class="fg-hint">可填写完整磁盘路径。每首歌曲一个 JSON 文件，包含网站歌词、读音和来源；更改目录后旧文件保留。</div>
-				<div class="fg-hint">加载期间沿用网易云音译 / 词典；只替换能核对原文的注音，保留原歌词和时间轴。网站注音也可能有错。</div>
+				<div class="fg-hint">“仅查询”限制外部网站来源；加载期间及未匹配的行仍沿用网易云音译 / 词典。网站命中的行采用网站读音，保留原歌词和时间轴。网站注音也可能有错。</div>
 				<div class="fg-external-error" role="alert"></div>
 				<div class="fg-external-status" role="status" style="white-space:pre-wrap;font-size:12px;margin:8px 0"></div>
 				<div class="fg-row"><button data-a="externalRetry">重新获取当前歌曲</button><button data-a="externalSource">查看来源网页</button></div>
@@ -1766,7 +1766,8 @@
 			const info = externalClient && externalClient.inspect();
 			root.querySelector('.fg-external-status').textContent = (info ? info.status : '等待播放日语歌曲…') +
 				(info && info.cachePath ? '\n缓存目录：' + info.cachePath : '') +
-				(info && info.source ? '\n当前已匹配：' + (state.srcExternal || 0) + ' 行；未匹配行继续回退' : '');
+				(info && info.source ? '\n当前歌词容器：网站命中 ' + (state.srcExternal || 0) + ' 行；网易云音译回退 ' +
+					(state.srcRomaji || 0) + ' 行；词典回退 ' + (state.srcDict || 0) + ' 行' : '');
 			root.querySelector('[data-a="externalSource"]').disabled = !(info && info.url);
 			if (!status) return; // 非开发模式没有这块
 			status.textContent = [
