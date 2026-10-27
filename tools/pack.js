@@ -24,7 +24,7 @@ const OUT_DIR = path.join(ROOT, 'builds');
 const OUT = path.join(OUT_DIR, 'jp-furigana-plus.plugin');
 
 // 全部取自 src/，和 BetterNCM 商店的取法一致（商店按 subpath=/src 直接打包这个目录），
-// 这样我们发的 .plugin 和商店分发的内容完全一样，不会有两套。
+// 运行源码来自同一目录。商店会将预览图单独发布，本地包保留该图。
 // 解包后这些必须直接躺在插件目录根下（manifest.json 在最外层）。
 const SRC_FILES = [
 	'manifest.json',
@@ -179,8 +179,8 @@ function main() {
 	const dictCount = entries.filter((e) => e.name.startsWith('dict/')).length;
 	if (dictCount !== 12) throw new Error(`dict/ 下应有 12 个词典文件，实际 ${dictCount} 个`);
 
-	// BetterNCM 商店按 subpath=/src 直接打包整个 src/，所以 src/ 里任何多出来的文件
-	// 都会被分发出去。这里断言 src/ 的内容和打包清单完全一致，防止误提交临时文件。
+	// BetterNCM 商店抓取整个 /src（预览图会单独发布）；目录中不能夹带临时文件。
+	// 这里断言 src/ 的内容和本地打包清单完全一致。
 	const expected = new Set([...SRC_FILES, ...SRC_DIRS]);
 	const actual = fs.readdirSync(SRC);
 	const extra = actual.filter((f) => !expected.has(f));

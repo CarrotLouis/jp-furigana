@@ -6,6 +6,7 @@ const m = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 for (const key of ['name','slug','version','author','author_link','description','preview','betterncm_version']) assert(m[key], 'Missing ' + key);
 assert.equal(m.slug, 'jp-furigana-plus'); assert.equal(m.fork_of, 'jp-furigana'); assert.equal(m.version, pkg.version);
+assert.deepEqual(m.requirements, ['RefinedNowPlayingNext']); assert.equal(m['ncm-version-req'], '> 3.1.11');
 assert.equal(m.require_restart, true); assert(!m.native_plugin, 'No bundled native executable');
 assert(/^[a-zA-Z0-9_-]+$/.test(m.slug)); assert(/^\d+\.\d+\.\d+$/.test(m.version));
 assert(!['force-install','force-update','force-uninstall'].some(k => m[k]), 'No forced market actions');

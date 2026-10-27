@@ -5,6 +5,7 @@
 - 名称：日语歌词振假名 Plus。
 - 插件 slug：`jp-furigana-plus`，来源标记：`fork_of: "jp-furigana"`。
 - 维护者：CarrotLouis；上游作者：leleawa。
+- 商店依赖：`RefinedNowPlayingNext`，已适配 3.0.2；`requirements` 不支持版本锁定。
 - 商店跟踪：`CarrotLouis/jp-furigana` 的 `standalone` 分支，子目录 `/src`。
 - `main` 保留向上游贡献的版本与原 PR；独立版的后续修复、版本发布和商店更新使用 `standalone`。
 
@@ -24,7 +25,7 @@ Plus 与原版功能重叠，应只启用一个版本。先在 BetterNCM 中移�
 
 ## 分发内容与复现
 
-商店应登记 `/src`；该目录只含运行脚本、PowerShell 源文件、预览图、离线词典及所需许可证。`node tools/pack.js` 的本地包与 `/src` 文件清单一致，不依赖构建时下载歌词或私有服务。
+商店应登记 `/src`；该目录只含运行脚本、PowerShell 源文件、预览图、离线词典及所需许可证。`node tools/pack.js` 的本地包与 `/src` 文件清单一致，不依赖构建时下载歌词或私有服务。商店在打包时会把预览图单独移到预览目录，再将其余内容打成 `.plugin`；因此商店包与本地包的预览图封装方式有所不同，运行源码相同。
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
@@ -59,7 +60,18 @@ node tools/pack.js
 
 ## 兼容性与验收边界
 
-最低声明 BetterNCM 1.3.4；沿用上游网易云 2.10.x／3.x 网页歌词适配，RNP 设置适配 3.0.2，原生桌面歌词不支持。新旧内核与逐字 filler 的模拟 DOM、实际词典和 Windows 原子保存分别测试，不将模拟结果写作全版本实机验证。完整记录见 [验证记录](validation.md)。
+最低声明 BetterNCM 1.3.4；商店版依赖 RefinedNowPlayingNext，已适配 3.0.2，网易云范围跟随该依赖为高于 3.1.11。基础代码保留上游 2.10.x 网页歌词处理，但不将其作为当前商店版支持范围。原生桌面歌词不支持。新旧内核与逐字 filler 的模拟 DOM、实际词典和 Windows 原子保存分别测试，不将模拟结果写作全版本实机验证。完整记录见 [验证记录](validation.md)。
+
+## 从提交到上架
+
+1. 维护者审核并合并 `plugins-list/jp-furigana-plus.json` 登记 PR。
+2. 更新脚本读取 `standalone/src/manifest.json`，从该分支抓取整个 `/src`，处理 `.betterncm-ignore`（如有），生成 `plugins-data` 源码更新审核 PR。
+3. 源码更新审核 PR 合并后，打包工作流把预览图单独发布到 `previews/`，将运行文件以 manifest 为压缩包根目录打成 `plugins/jp-furigana-plus-<版本>.plugin`，并生成 `plugins.json` 索引。
+4. 产物推送到 `BetterNCM/BetterNCM-Packed-Plugins`，商店刷新索引后显示并提供安装。
+
+只需在登记中提供正确仓库、分支和 `/src`；不需要把手工生成的 `.plugin` 提交到插件库。GitHub Release 或 CI artifact 方便手动安装，但不是此抓取流程的输入。审核与工作流执行需要维护者处理，不保证登记 PR 一合并就立即上架。
+
+流程依据：[源码更新脚本](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/scripts/update-plugins/update-plugins.js)、[打包脚本](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/scripts/pack-plugins/pack-plugins.js)、[发布工作流](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/.github/workflows/pack-and-push.yml)。
 
 ## 后续商店更新
 
