@@ -28,7 +28,7 @@ const bn = {
 		readFileText: p => fs.readFile(p, 'utf8'),
 		writeFileText: async (p, text) => { await fs.writeFile(p, text, 'utf8'); return true; },
 		writeFile: async (p, blob) => { await fs.writeFile(p, Buffer.from(await blob.arrayBuffer())); return true; },
-		remove: async p => { assert(/^request-[a-f0-9]{32}\.json(?:\.partial)?$/.test(path.basename(p))); await fs.unlink(p); return true; }
+		remove: async p => { assert(/^request-[a-f0-9]{32}\.json(?:\.(?:partial|cancel))?$/.test(path.basename(p))); await fs.unlink(p); return true; }
 	}
 };
 const transport = clientModule.browserTransport(bn, { pluginPath: path.resolve(__dirname, '../src') }, { parse: html => new JSDOM(html).window.document });
@@ -69,6 +69,8 @@ async function testProviders() {
 }
 async function testProxy() {
 	let connects = 0;
+	let mode = 'normal';
+	const delays = new Set();
 	const server = net.createServer(socket => {
 		sockets.add(socket); socket.on('error', () => {}); socket.on('close', () => sockets.delete(socket));
 		let buffer = Buffer.alloc(0);
@@ -79,10 +81,15 @@ async function testProxy() {
 			socket.removeListener('data', read);
 			if (!/^CONNECT utaten\.com:443 HTTP\/1\.[01]\r\n/.test(buffer.toString('ascii'))) { socket.end('HTTP/1.1 403 Forbidden\r\n\r\n'); return; }
 			connects++;
+			if (mode === 'stall') return; // Exercise real cancellation while curl is connecting.
 			const upstream = net.connect(443, 'utaten.com', () => {
-				socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-				if (buffer.length > end + 4) upstream.write(buffer.subarray(end + 4));
-				socket.pipe(upstream); upstream.pipe(socket);
+				const forward = () => {
+					socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+					if (buffer.length > end + 4) upstream.write(buffer.subarray(end + 4));
+					socket.pipe(upstream); upstream.pipe(socket);
+				};
+				if (mode === 'slow') { const timer = setTimeout(() => { delays.delete(timer); forward(); }, 6200); delays.add(timer); }
+				else forward();
 			});
 			sockets.add(upstream); upstream.on('close', () => sockets.delete(upstream));
 			upstream.on('error', () => socket.destroy()); socket.on('close', () => upstream.destroy());
@@ -94,8 +101,23 @@ async function testProxy() {
 		const html = await measuredRequest('https://utaten.com/lyric/jb50812046/', 'http://127.0.0.1:' + server.address().port);
 		assert(core.parseUtaten(transport.parse(html), 'https://utaten.com/lyric/jb50812046/').lines.length > 0);
 		assert(connects > 0, 'Request must actually traverse the configured proxy');
-		return { protocol: 'HTTP CONNECT', successfulConnections: connects };
-	} finally { for (const socket of sockets) socket.destroy(); await new Promise(resolve => server.close(resolve)); }
+		mode = 'slow'; const slowStart = performance.now();
+		const slow = await measuredRequest('https://utaten.com/lyric/jb50812046/', 'http://127.0.0.1:' + server.address().port);
+		assert(core.parseUtaten(transport.parse(slow), 'https://utaten.com/lyric/jb50812046/').lines.length > 0);
+		const slowMs = Math.round(performance.now() - slowStart);
+		assert(slowMs >= 6200, 'The delayed proxy must exceed the old five-second connection budget');
+		mode = 'stall'; const before = connects; let cancelled = false;
+		const stalled = measuredRequest('https://utaten.com/lyric/jb50812046/', 'http://127.0.0.1:' + server.address().port, () => cancelled);
+		const assertion = assert.rejects(stalled, /已取消/);
+		const deadline = Date.now() + 10000;
+		while (connects === before && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+		assert(connects > before); const cancelStart = performance.now(); cancelled = true;
+		await assertion; const cancelMs = Math.round(performance.now() - cancelStart);
+		assert(cancelMs < 5000, 'Cancelling should kill the blocked curl, not wait for its timeout');
+		const leftovers = await fs.readdir(path.join(privateRoot, 'lyrics/jp-furigana/requests'));
+		assert(!leftovers.some(name => /\.(cancel|headers|partial)$/.test(name)), 'Cancellation sidecars must be cleaned');
+		return { protocol: 'HTTP CONNECT', successfulConnections: connects - 1, delayedConnectMilliseconds: slowMs, cancelledRequestMilliseconds: cancelMs };
+	} finally { for (const timer of delays) clearTimeout(timer); for (const socket of sockets) socket.destroy(); await new Promise(resolve => server.close(resolve)); }
 }
 (async () => {
 	if (process.platform !== 'win32') throw new Error('Windows is required for the actual transport smoke test');

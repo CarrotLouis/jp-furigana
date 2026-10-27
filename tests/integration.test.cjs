@@ -30,7 +30,7 @@ win.fetch = async () => ({ ok: true, json: async () => ({
 	lrc: { lyric: texts.map((text, i) => '[00:0' + (i + 1) + ']' + text).join('\n') },
 	romalrc: { lyric: '[00:01]ko i bi to to so ra wo mi ru\n[00:02]a ra ga e nu o ki do u no a n ga ka re wo tsu tsu n da\n[00:03]so ra wo mi ru hi' }
 }) });
-for (const file of ['furigana.js', 'external-core.js', 'external.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
+for (const file of ['furigana.js', 'external-core.js', 'external.js', 'rnp-settings.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
 win.FuriganaExternal.browserTransport = () => ({
 	dataRoot: async () => 'C:/BetterNCM',
 	fs: { mkdir: async () => true, exists: async p => disk.has(p), readFileText: async p => disk.get(p), writeFileText: async (p, value) => { disk.set(p, value); return true; } },
@@ -77,6 +77,25 @@ const assertScreenshot = (mode = 'hiragana') => {
 	proxy.value = 'http://user:password@127.0.0.1:7890'; proxy.dispatchEvent(new win.Event('change'));
 	assert(panel.querySelector('.fg-external-error').textContent.includes('账号密码'));
 	assert.equal(win.JPFurigana.config.externalProxy, '');
+	// The RNP menu is mounted later than plugin initialization, as in the real client.
+	const rnpMenu = win.document.createElement('div'); rnpMenu.className = 'rnp-settings-menu';
+	rnpMenu.innerHTML = '<div class="rnp-settings-menu-tabs"><div class="rnp-settings-menu-tab" data-tab="lyric">歌词</div><div class="rnp-settings-menu-tab" data-tab="font">字体</div></div><div class="rnp-settings-menu-inner"><div class="rnp-group" data-tab="lyric"></div><div class="rnp-group" data-tab="font"></div></div>';
+	win.document.body.append(rnpMenu);
+	await until(() => rnpMenu.querySelector('[data-key="enabled"]'));
+	const beforeStyleChange = requests;
+	const size = rnpMenu.querySelector('[data-key="rtSize"]'); size.value = '70'; size.dispatchEvent(new win.Event('input'));
+	assert.equal(win.JPFurigana.config.rtSize, 70); assert.equal(panel.querySelector('[data-k="rtSize"]').value, '70');
+	assert.equal(requests, beforeStyleChange, 'Appearance changes must not reload external lyrics');
+	const normalSize = panel.querySelector('[data-k="rtSize"]'); normalSize.value = '60'; normalSize.dispatchEvent(new win.Event('input'));
+	assert.equal(size.value, '60', 'Normal settings synchronize back to the RNP menu');
+	rnpMenu.querySelector('[data-choice="externalAutoRetry"] [data-value="off"]').click();
+	assert.equal(panel.querySelector('[data-k="externalAutoRetry"]').value, 'off');
+	assert.equal(requests, beforeStyleChange, 'Disabling auto retry does not trigger a new request');
+	const rnpEnabled = rnpMenu.querySelector('[data-key="enabled"]'); rnpEnabled.checked = false; rnpEnabled.dispatchEvent(new win.Event('change'));
+	assert.equal(win.JPFurigana.config.enabled, false); assert(!panel.querySelector('[data-k="enabled"]').checked);
+	assert(lyricLines().every(n => !n.querySelector('.fg-rt')));
+	rnpEnabled.checked = true; rnpEnabled.dispatchEvent(new win.Event('change'));
+	await until(() => readings().includes('あなた')); assert.equal(requests, beforeStyleChange);
 	const count = requests;
 	win.JPFurigana.set('kana', 'katakana');
 	await until(() => readings().includes('アナタ'));

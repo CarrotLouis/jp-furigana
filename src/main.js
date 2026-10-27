@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'external-lyrics-3';
+	const BUILD = 'external-lyrics-4';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -26,6 +26,7 @@
 		// romaji = 优先用网易云接口给的官方音译，拿不到或对不齐才退回词典；dict = 只用词典
 		readingSource: 'romaji',
 		externalProvider: 'auto', // UtaTen first, then Uta-Net
+		externalAutoRetry: 'failed', // off | failed (at most three transient-error retries per load)
 		externalProxyEnabled: false,
 		externalProxy: '',
 		externalCacheDir: '', // default: <BetterNCM data>/lyrics/jp-furigana
@@ -1049,10 +1050,12 @@
 			}
 			calibrate();
 			state.annotated = annotated;
+			const previousSources = [state.srcRomaji, state.srcDict, state.srcExternal].join('|');
 			state.srcRomaji = lines.filter((l) => l.__fgSource === 'romaji').length;
 			state.srcDict = lines.filter((l) => l.__fgSource === 'dict').length;
 			state.srcExternal = lines.filter((l) => l.__fgSource === 'external').length;
 			lastLines = lines;
+			if (previousSources !== [state.srcRomaji, state.srcDict, state.srcExternal].join('|')) notifyConfigUI();
 		} finally {
 			// MutationObserver 的回调在本次同步任务结束后才跑，光靠 applying 标志挡不住
 			// 我们自己造成的变更；把记录队列清空，否则会自激成死循环。
@@ -1661,6 +1664,39 @@
 			}
 		}
 	}
+	const NEEDS_RESCAN = ['kana', 'readingSource', 'externalProvider', 'externalProxyEnabled', 'externalProxy', 'externalCacheDir',
+		'karaoke', 'onlyFirstLine', 'skipCredits', 'skipNoKanaLines', 'requireLyricClass', 'customSelector'];
+	function setConfigValue(key, value) {
+		if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) throw new Error('未知设置项');
+		if (key === 'externalProxy') value = FuriganaExternal.validateProxy(value);
+		if (key === 'rtSize' || key === 'rtOpacity') {
+			value = Number(value); if (!Number.isFinite(value)) throw new Error('请输入有效数值');
+			value = Math.max(20, Math.min(100, Math.round(value)));
+		}
+		const choices = { readingSource: ['romaji', 'dict', 'external'], externalProvider: ['auto', 'utaten', 'utanet'], externalAutoRetry: ['off', 'failed'], kana: ['hiragana', 'katakana'] };
+		if (choices[key] && !choices[key].includes(value)) throw new Error('无效的设置选项');
+		if (typeof DEFAULTS[key] === 'boolean') value = !!value;
+		config[key] = value; saveConfig(); updateStyles();
+		if (key === 'enabled') value ? enable() : disable();
+		else if (key === 'externalAutoRetry') { if (externalClient) externalClient.setAutoRetry(value); }
+		else if (NEEDS_RESCAN.includes(key)) rescan();
+		notifyConfigUI();
+		return config[key];
+	}
+	function externalStatusText() {
+		const info = externalClient && externalClient.inspect();
+		return (info ? info.status : '等待播放日语歌曲…') + (info && info.cachePath ? '\n缓存目录：' + info.cachePath : '') +
+			(info && info.source ? '\n当前歌词容器：网站命中 ' + (state.srcExternal || 0) + ' 行；网易云音译回退 ' +
+				(state.srcRomaji || 0) + ' 行；词典回退 ' + (state.srcDict || 0) + ' 行' : '');
+	}
+	function retryExternal() {
+		if (!config.enabled || config.readingSource !== 'external' || !getCurrentTrackId()) return;
+		state.externalForce = true; resetExternal(); invalidateAll(); schedule(0);
+	}
+	function openExternalSource() {
+		const info = externalClient && externalClient.inspect();
+		if (info && FuriganaExternalCore.allowedURL(info.url)) betterncm.ncm.openUrl(info.url);
+	}
 
 	function buildConfigUI() {
 		const root = document.createElement('div');
@@ -1715,6 +1751,11 @@
 					<option value="utaten">仅查询 UtaTen 振假名</option>
 					<option value="utanet">仅查询歌ネット罗马音</option>
 				</select></div>
+				<div class="fg-row"><label>自动重新获取</label><select data-k="externalAutoRetry">
+					<option value="off">关闭（仍会首次获取）</option>
+					<option value="failed">失败后自动重试（最多 3 次）</option>
+				</select></div>
+				<div class="fg-hint">超时等临时网络故障按 3 / 8 / 15 秒间隔重试失败的请求；关闭后取消等待。没有匹配歌曲、网页格式错误或 HTTP 403 等情况不自动反复请求。</div>
 				<div class="fg-row"><label><input type="checkbox" data-k="externalProxyEnabled"> 使用代理获取外部歌词</label></div>
 				<div class="fg-row"><label>代理地址</label><input type="text" data-k="externalProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false"></div>
 				<div class="fg-hint">支持 HTTP / HTTPS / SOCKS5 / SOCKS5H；仅影响外部歌词网站，不改变网易云联网方式。不支持带账号密码的代理 URL。</div>
@@ -1764,11 +1805,10 @@
 			const section = root.querySelector('.fg-external-settings');
 			section.hidden = config.readingSource !== 'external';
 			const info = externalClient && externalClient.inspect();
-			root.querySelector('.fg-external-status').textContent = (info ? info.status : '等待播放日语歌曲…') +
-				(info && info.cachePath ? '\n缓存目录：' + info.cachePath : '') +
-				(info && info.source ? '\n当前歌词容器：网站命中 ' + (state.srcExternal || 0) + ' 行；网易云音译回退 ' +
-					(state.srcRomaji || 0) + ' 行；词典回退 ' + (state.srcDict || 0) + ' 行' : '');
+			const externalStatus = root.querySelector('.fg-external-status'), text = externalStatusText();
+			if (externalStatus.textContent !== text) externalStatus.textContent = text;
 			root.querySelector('[data-a="externalSource"]').disabled = !(info && info.url);
+			root.querySelector('[data-a="externalRetry"]').disabled = !config.enabled || !getCurrentTrackId();
 			if (!status) return; // 非开发模式没有这块
 			status.textContent = [
 				`词典：${state.tokenizer ? '已就绪' : state.loadError ? '失败 ' + state.loadError : '加载中'}`,
@@ -1783,22 +1823,6 @@
 		// 滑块旁边那行数值怎么显示
 		const fmt = (key) => config[key] + '%';
 
-		// 改了这些设置需要把已有的注音全部重做
-		const NEEDS_RESCAN = [
-			'kana',
-			'readingSource',
-			'externalProvider',
-			'externalProxyEnabled',
-			'externalProxy',
-			'externalCacheDir',
-			'karaoke',
-			'onlyFirstLine',
-			'skipCredits',
-			'skipNoKanaLines',
-			'requireLyricClass',
-			'customSelector',
-		];
-
 		root.querySelectorAll('[data-k]').forEach((el) => {
 			const key = el.dataset.k;
 			if (el.type === 'checkbox') el.checked = !!config[key];
@@ -1807,19 +1831,11 @@
 			const commit = () => {
 				const error = root.querySelector('.fg-external-error');
 				error.textContent = '';
-				if (key === 'externalProxy') {
-					try { el.value = FuriganaExternal.validateProxy(el.value); }
-					catch (e) { error.textContent = e.message; return; }
-				}
-				config[key] = el.type === 'checkbox' ? el.checked : el.value;
-				if (el.type === 'range') config[key] = Number(el.value);
-				saveConfig();
-				updateStyles();
+				try { setConfigValue(key, el.type === 'checkbox' ? el.checked : el.value); }
+				catch (e) { error.textContent = e.message; return; }
 				const out = root.querySelector(`[data-v="${key}"]`);
 				if (out) out.textContent = fmt(key);
 
-				if (key === 'enabled') config[key] ? enable() : disable();
-				else if (NEEDS_RESCAN.includes(key)) rescan();
 				refreshPreview();
 				refreshStatus();
 			};
@@ -1848,14 +1864,8 @@
 			const el = root.querySelector(`[data-a="${action}"]`);
 			if (el) el.onclick = handler;
 		};
-		onClick('externalRetry', () => {
-			state.externalForce = true;
-			resetExternal(); invalidateAll(); schedule(0);
-		});
-		onClick('externalSource', () => {
-			const info = externalClient && externalClient.inspect();
-			if (info && FuriganaExternalCore.allowedURL(info.url)) betterncm.ncm.openUrl(info.url);
-		});
+		onClick('externalRetry', retryExternal);
+		onClick('externalSource', openExternalSource);
 		onClick('rescan', () => {
 			rescan();
 			setTimeout(refreshStatus, 500);
@@ -1872,6 +1882,13 @@
 		});
 
 		const refreshAll = () => {
+			for (const el of root.querySelectorAll('[data-k]')) {
+				if (document.activeElement === el) continue;
+				if (el.type === 'checkbox') el.checked = !!config[el.dataset.k];
+				else el.value = config[el.dataset.k];
+				const out = root.querySelector('[data-v="' + el.dataset.k + '"]');
+				if (out && out.textContent !== fmt(el.dataset.k)) out.textContent = fmt(el.dataset.k);
+			}
 			refreshPreview();
 			refreshStatus();
 		};
@@ -1915,17 +1932,18 @@
 		updateStyles();
 		startObserver();
 		if (config.enabled) loadTokenizer();
+		if (typeof FuriganaRnpSettings !== 'undefined') FuriganaRnpSettings.install({
+			config: () => config, set: setConfigValue,
+			status: () => { const info = externalClient && externalClient.inspect(); return { text: externalStatusText(),
+				canRetry: config.enabled && config.readingSource === 'external' && !!getCurrentTrackId(), canOpen: !!(info && info.url) }; },
+			subscribe: fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },
+			retry: retryExternal, openSource: openExternalSource,
+		});
 		window.JPFurigana = {
 			config,
 			// 高级项的界面只在开发模式下露出，非开发模式想改就走这里
 			// 例如 JPFurigana.set('customSelector', 'ul.lyric > li > p')
-			set: (key, value) => {
-				config[key] = value;
-				saveConfig();
-				updateStyles();
-				rescan();
-				return config[key];
-			},
+			set: setConfigValue,
 			state,
 			core: FuriganaCore,
 			build: BUILD,

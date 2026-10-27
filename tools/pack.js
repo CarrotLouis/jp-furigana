@@ -32,6 +32,7 @@ const SRC_FILES = [
 	'furigana.js',
 	'external-core.js',
 	'external.js',
+	'rnp-settings.js',
 	'external-fetch.ps1',
 	'kuromoji.js',
 	'preview.jpg',

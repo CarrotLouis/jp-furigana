@@ -19,6 +19,8 @@
 
 在「BetterNCM → 插件 → 日语歌词振假名」设置页，将「读音来源」切到 **外部网站** 即可使用新功能。可选 HTTP / HTTPS / SOCKS5 / SOCKS5H 代理，并可更改缓存文件夹。外部取词使用 Windows 自带 PowerShell 5.1 与 `curl.exe`，需要 Windows 10 1803 或更新版本；不安装运行库，不开启常驻服务。
 
+1.3.0 放宽慢速连接的超时预算，并新增可关闭的自动重试（临时网络失败最多补试三次，关闭仍会首次获取）。安装 RefinedNowPlayingNext 3.0.2 时，其播放页设置会在「歌词」后增加「注音」入口，与本插件设置同步；无需修改 RNP 插件。
+
 完整的使用方式、获取策略与限制见 [外部歌词说明](docs/external-lyrics.md)，验证范围见 [测试记录](docs/validation.md)。
 
 ## 说明

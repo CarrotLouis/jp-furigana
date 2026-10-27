@@ -16,6 +16,20 @@
 		return text;
 	}
 	const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+	function requestError(result) {
+		const status = Number(result.status) || 0, code = Number(result.curlCode) || 0;
+		const message = code === 28 ? '请求超时（curl error 28）' : status ? 'HTTP ' + status : String(result.error || '网络请求失败');
+		const error = new Error(message);
+		error.retryable = [408, 425, 429, 500, 502, 503, 504].includes(status) || [5, 6, 7, 18, 28, 35, 52, 55, 56, 92, 97].includes(code);
+		const after = String(result.retryAfter || '').trim();
+		error.retryAfterMs = /^\d+$/.test(after) ? Number(after) * 1000 : Math.max(0, (Date.parse(after) || 0) - Date.now());
+		return error;
+	}
+	function retryable(error) {
+		if (typeof error.retryable === 'boolean') return error.retryable;
+		return error.name === 'AbortError' || error instanceof TypeError && /fetch|network/i.test(error.message) ||
+			/HTTP (408|425|429|500|502|503|504)\b|curl error (5|6|7|18|28|35|52|55|56|92|97)\b/.test(error.message);
+	}
 	function browserTransport(bn, plugin, options = {}) {
 		let scriptPromise, rootPromise;
 		let chain = Promise.resolve();
@@ -45,17 +59,22 @@
 				const encoded = toBase64(JSON.stringify({ url, proxy, reply }));
 				const command = 'powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + command64('& {\n' + script + '\n} ' + encoded);
 				if (command.length > 30000) throw new Error('网络脚本超出 Windows 命令长度限制');
-				const deadline = Date.now() + 40000;
+				const deadline = Date.now() + 45000;
+				let cancellationSent = false;
 				try {
 					if (cancelled()) throw new Error('已取消');
 					if (!await bn.app.exec(command, false, false)) throw new Error('无法启动系统网络组件');
 					while (Date.now() < deadline) {
+						if (cancelled() && !cancellationSent) {
+							cancellationSent = true;
+							try { await storage.writeFileText(reply + '.cancel', '1'); } catch (_) { /* bounded helper timeout still applies */ }
+						}
 						if (await bn.fs.exists(reply)) {
 							const raw = await bn.fs.readFileText(reply);
 							if (cancelled()) throw new Error('已取消');
 							if (raw.length > 3000000) throw new Error('网站响应过大');
 							const result = JSON.parse(raw);
-							if (!result.ok) throw new Error(result.status ? 'HTTP ' + result.status : String(result.error || '网络请求失败'));
+							if (!result.ok) throw requestError(result);
 							if (typeof result.body !== 'string' || !core.allowedURL(result.url)) throw new Error('无效的网站响应');
 							return result.body;
 						}
@@ -64,7 +83,7 @@
 					throw new Error('网络请求超时（系统组件可能被拦截）');
 				} finally {
 					// Only this request's exact filenames, never a directory or wildcard.
-					for (const path of [reply, reply + '.partial']) {
+					for (const path of [reply, reply + '.partial', reply + '.cancel']) {
 						try { if (await bn.fs.exists(path)) await bn.fs.remove(path); } catch (_) { /* next request remains usable */ }
 					}
 				}
@@ -83,11 +102,26 @@
 	function create(deps) {
 		let generation = 0, currentId = null, current = null, groups = [], status = '未启用外部网站';
 		let cachePath = '', source = '', lastSettings = null;
+		let cancelWait = null, loading = false, lastMetadata = null;
+		const retryDelays = deps.retryDelays || [3000, 8000, 15000];
 		const lineCache = new Map();
 		function announce(text) { status = text; if (deps.onStatus) deps.onStatus(); }
 		const alive = g => g === generation;
-		function reset() { generation++; currentId = null; current = null; groups = []; source = ''; lineCache.clear(); }
+		function cancelRetry() { if (cancelWait) cancelWait(); }
+		function reset() { generation++; cancelRetry(); loading = false; currentId = null; current = null; groups = []; source = ''; lineCache.clear(); }
 		function stop() { reset(); announce('未启用外部网站'); }
+		function waitRetry(ms) {
+			return new Promise(resolve => {
+				const timer = setTimeout(() => { cancelWait = null; resolve(true); }, ms);
+				cancelWait = () => { clearTimeout(timer); cancelWait = null; resolve(false); };
+			});
+		}
+		function setAutoRetry(value) {
+			if (!lastSettings) return;
+			lastSettings.externalAutoRetry = value;
+			if (value !== 'failed') cancelRetry();
+			else if (!loading && currentId && !current && lastMetadata) return load(currentId, lastMetadata, lastSettings);
+		}
 		async function directory(settings) {
 			const root = await deps.dataRoot();
 			let path = String(settings.externalCacheDir || '').trim().replace(/\\/g, '/');
@@ -104,9 +138,26 @@
 			if (deps.onReady) deps.onReady();
 		}
 		async function load(songId, metadata, settings, force = false) {
-			reset(); const g = generation; currentId = String(songId); lastSettings = { ...settings };
+			reset(); const g = generation; currentId = String(songId); settings = { ...settings }; lastSettings = settings; lastMetadata = metadata;
 			if (!/^\d{1,20}$/.test(currentId)) { announce('当前歌曲没有可用的网易云 ID'); return; }
 			const id = currentId;
+			loading = true;
+			let retries = 0;
+			async function attempt(task, label) {
+				for (;;) {
+					if (!alive(g)) throw new Error('已取消');
+					try { return await task(); } catch (error) {
+						if (!alive(g) || settings.externalAutoRetry !== 'failed' || !retryable(error) || retries >= retryDelays.length) throw error;
+						const delay = Math.max(retryDelays[retries], error.retryAfterMs || 0);
+						// Respect long server cooldowns without retaining a song's task indefinitely.
+						if (!Number.isFinite(delay) || delay > 300000) throw error;
+						retries++;
+						announce(label + '：' + error.message + '；' + Math.ceil(delay / 1000) + ' 秒后自动重试（' + retries + '/' + retryDelays.length + '）');
+						if (!await waitRetry(delay) || !alive(g) || settings.externalAutoRetry !== 'failed') throw error;
+						announce(label + '：正在自动重试（' + retries + '/' + retryDelays.length + '）…');
+					}
+				}
+			}
 			announce('读取外部歌词缓存…');
 			try {
 				const dir = await directory(settings);
@@ -125,7 +176,7 @@
 				}
 				if (!alive(g)) return;
 				announce('获取歌曲信息…');
-				const track = await metadata();
+				const track = await attempt(metadata, '获取歌曲信息');
 				if (!alive(g)) return;
 				if (!track || !track.title || !Array.isArray(track.artists) || !track.artists.some(Boolean)) throw new Error('无法确定歌名与歌手，请稍后重试');
 				const proxy = settings.externalProxyEnabled ? validateProxy(settings.externalProxy) : '';
@@ -136,7 +187,8 @@
 					if (!alive(g)) return;
 					try {
 						announce('正在查询 ' + (provider === 'utaten' ? 'UtaTen' : '歌ネット') + '，暂用网易云音译 / 词典…');
-						const fetchDoc = async url => deps.parse(await deps.request(url, proxy, () => !alive(g)));
+						const fetchDoc = async url => deps.parse(await attempt(() => deps.request(url, proxy, () => !alive(g)),
+							(provider === 'utaten' ? 'UtaTen' : '歌ネット') + (url.includes('/search') ? ' 搜索' : ' 歌词页')));
 						const search = await fetchDoc(core.searchURL(provider, track));
 						if (!alive(g)) return;
 						const candidates = core.searchResults(search, provider).filter(c => core.matches(c, track));
@@ -159,6 +211,7 @@
 				}
 				if (alive(g)) announce(errors.join('\n') + '\n继续使用网易云音译 / 词典；可手动重试');
 			} catch (error) { if (alive(g)) announce(error.message + '；继续使用网易云音译 / 词典'); }
+			finally { if (alive(g)) loading = false; }
 		}
 		function segments(text, mode, fromRomaji) {
 			if (!current) return null;
@@ -169,7 +222,7 @@
 			}
 			return lineCache.get(k);
 		}
-		return { load, stop, segments, inspect: () => ({ songId: currentId, status, cachePath, source, url: current && current.url, settings: lastSettings }) };
+		return { load, stop, setAutoRetry, segments, inspect: () => ({ songId: currentId, status, cachePath, source, loading, waitingRetry: !!cancelWait, url: current && current.url, settings: lastSettings }) };
 	}
-	return { create, browserTransport, validateProxy };
+	return { create, browserTransport, validateProxy, requestError };
 });
