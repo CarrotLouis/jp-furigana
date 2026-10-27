@@ -1,7 +1,7 @@
 /* Lazy website client, on-demand Windows transport and per-song JSON cache. */
 (function (root, factory) {
 	if (typeof module === 'object' && module.exports) module.exports = factory(require('./external-core.js'), require('./user-edits.js'));
-	else root.FuriganaExternal = factory(root.FuriganaExternalCore, root.FuriganaUserEdits);
+	else root.FuriganaPlusExternal = factory(root.FuriganaPlusExternalCore, root.FuriganaPlusUserEdits);
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (core, edits) {
 	'use strict';
 	function validateProxy(value) {

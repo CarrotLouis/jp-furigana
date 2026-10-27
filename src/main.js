@@ -1,5 +1,5 @@
 /*
- * 日语歌词振假名 (jp-furigana) —— BetterNCM 插件
+ * 日语歌词振假名 Plus (jp-furigana-plus) —— BetterNCM 插件
  *
  * 思路：
  *   1. kuromoji + IPADIC 全部打包在插件目录里，词典通过 betterncm.fs 读，完全离线。
@@ -11,13 +11,13 @@
 (() => {
 	'use strict';
 
-	const LOG = '[jp-furigana]';
-	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'external-lyrics-5';
+	const LOG = '[jp-furigana-plus]';
+	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFuriganaPlus.build）
+	const BUILD = 'standalone-1.5.0';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
-	const CONFIG_KEY = 'jp-furigana.config';
+	const CONFIG_KEY = 'jp-furigana-plus.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
-	const CACHE_KEY = 'jp-furigana.cache.v4';
+	const CACHE_KEY = 'jp-furigana-plus.cache.v4';
 	const CACHE_LIMIT = 4000;
 
 	const DEFAULTS = {
@@ -64,7 +64,19 @@
 	function loadConfig() {
 		let saved = {};
 		try {
-			saved = JSON.parse(localStorage.getItem(CONFIG_KEY)) || {};
+			let raw = localStorage.getItem(CONFIG_KEY);
+			// One-time copy for users upgrading from the earlier same-slug fork.
+			// Never change the original plugin's settings or computed cache.
+			if (raw === null) {
+				const legacy = localStorage.getItem('jp-furigana.config');
+				if (legacy) {
+					const parsed = JSON.parse(legacy);
+					if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+						raw = JSON.stringify(parsed); localStorage.setItem(CONFIG_KEY, raw);
+					}
+				}
+			}
+			saved = JSON.parse(raw) || {};
 		} catch (e) {
 			/* 坏了就用默认值 */
 		}
@@ -92,11 +104,11 @@
 	}
 
 	// 插件放在 plugins_dev 里时 BetterNCM 会置上 devMode；
-	// 装成 .plugin 后想排障可以在控制台执行 localStorage['jp-furigana.dev'] = '1' 再重启。
+	// 装成 .plugin 后想排障可以在控制台执行 localStorage['jp-furigana-plus.dev'] = '1' 再重启。
 	const DEV = (() => {
 		try {
 			if (typeof plugin !== 'undefined' && plugin.devMode) return true;
-			return localStorage.getItem('jp-furigana.dev') === '1';
+			return localStorage.getItem('jp-furigana-plus.dev') === '1';
 		} catch (e) {
 			return false;
 		}
@@ -112,8 +124,8 @@
 	function hasRuby() {
 		if (rubySupport !== null) return rubySupport;
 		try {
-			// 排障用：localStorage['jp-furigana.no-ruby'] = '1' 可以强制走降级
-			if (localStorage.getItem('jp-furigana.no-ruby') === '1') return (rubySupport = false);
+			// 排障用：localStorage['jp-furigana-plus.no-ruby'] = '1' 可以强制走降级
+			if (localStorage.getItem('jp-furigana-plus.no-ruby') === '1') return (rubySupport = false);
 		} catch (e) {
 			/* 读不到就算了 */
 		}
@@ -177,7 +189,7 @@
 	/** 原文行 -> 注音片段。内存 Map + localStorage 持久化。 */
 	const cache = new Map();
 	try {
-		localStorage.removeItem('jp-furigana.cache.v3'); // obsolete results could include missing readings
+		localStorage.removeItem('jp-furigana-plus.cache.v3'); // obsolete results could include missing readings
 		const raw = JSON.parse(localStorage.getItem(CACHE_KEY));
 		if (raw && typeof raw === 'object')
 			for (const k of Object.keys(raw)) cache.set(k, raw[k]);
@@ -223,7 +235,7 @@
 		const key = 'd|' + config.kana + '|' + text;
 		const hit = cache.get(key);
 		if (hit) return hit;
-		const segs = FuriganaCore.tokensToSegments(FuriganaCore.tokenizeForReading(state.tokenizer, text), {
+		const segs = FuriganaPlusCore.tokensToSegments(FuriganaPlusCore.tokenizeForReading(state.tokenizer, text), {
 			kana: config.kana,
 		});
 		cache.set(key, segs);
@@ -235,10 +247,10 @@
 	function getSegmentsFromRomaji(text, romaji) {
 		const key = 'r|' + config.kana + '|' + romaji + '|' + text;
 		if (cache.has(key)) return cache.get(key);
-		const kana = FuriganaCore.romajiToKana(romaji);
+		const kana = FuriganaPlusCore.romajiToKana(romaji);
 		// 结构取自词典分词，读音取自音译；见 furigana.js 的 segmentsFromReading
 		const segs = kana
-			? FuriganaCore.segmentsFromReading(text, kana, getSegments(text), {
+			? FuriganaPlusCore.segmentsFromReading(text, kana, getSegments(text), {
 					kana: config.kana,
 			  })
 			: null;
@@ -251,7 +263,7 @@
 
 	/** kuromoji 的浏览器版用 XHR 读词典；这里换成 betterncm.fs，免得依赖内置 HTTP 端口 */
 	function installDictLoader() {
-		globalThis.__FURIGANA_DICT_LOADER__ = async (path) => {
+		globalThis.__FURIGANA_PLUS_DICT_LOADER__ = async (path) => {
 			const data = await betterncm.fs.readFile(path);
 			if (data instanceof ArrayBuffer) return data;
 			if (data && typeof data.arrayBuffer === 'function') return data.arrayBuffer();
@@ -265,8 +277,8 @@
 		const candidates = [];
 		if (typeof plugin !== 'undefined' && plugin.pluginPath)
 			candidates.push(plugin.pluginPath + '/dict');
-		candidates.push('./plugins_dev/jp-furigana/dict');
-		candidates.push('./plugins_runtime/jp-furigana/dict');
+		candidates.push('./plugins_dev/jp-furigana-plus/dict');
+		candidates.push('./plugins_runtime/jp-furigana-plus/dict');
 		for (const c of candidates) {
 			try {
 				if (await betterncm.fs.exists(c + '/base.dat.gz')) return c;
@@ -285,7 +297,7 @@
 		const dicPath = await resolveDicPath();
 		console.log(LOG, '开始加载词典', dicPath);
 		const t0 = performance.now();
-		kuromoji.builder({ dicPath }).build((err, tokenizer) => {
+		kuromojiFuriganaPlus.builder({ dicPath }).build((err, tokenizer) => {
 			state.loading = false;
 			if (err) {
 				state.loadError = err;
@@ -389,7 +401,7 @@
 		const roma = json.romalrc && json.romalrc.lyric;
 		if (lrc && getCurrentTrackId() === trackId) state.evidence = { songId: trackId, lines: lrc.split(/\r?\n/).map(l => l.replace(/\[[^\]]*\]/g, '').trim()).filter(Boolean) };
 		if (!lrc || !roma) return new Map(); // 这首没有官方音译
-		return FuriganaCore.buildRomajiMap(lrc, roma);
+		return FuriganaPlusCore.buildRomajiMap(lrc, roma);
 	}
 
 	/** 换歌了就异步拉一次音译；查表是按歌词文本，所以就算 id 拿错了也只是查不到 */
@@ -424,9 +436,9 @@
 	let externalClient = null;
 	let editor = null, playPending = false;
 	function getExternalClient() {
-		if (!externalClient && typeof FuriganaExternal !== 'undefined') {
-			externalClient = FuriganaExternal.create({
-				...FuriganaExternal.browserTransport(betterncm, plugin),
+		if (!externalClient && typeof FuriganaPlusExternal !== 'undefined') {
+			externalClient = FuriganaPlusExternal.create({
+				...FuriganaPlusExternal.browserTransport(betterncm, plugin),
 				lyrics: async id => {
 					if (state.evidence && state.evidence.songId === id) return state.evidence.lines;
 					const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 8000);
@@ -521,8 +533,8 @@
 
 	/** 这一行要不要跳过（不注音）。制作信息的判定见 furigana.js 的 isCreditLine */
 	function shouldSkipLine(text) {
-		if (config.skipCredits && FuriganaCore.isCreditLine(text)) return true;
-		if (config.skipNoKanaLines && !FuriganaCore.hasKana(text)) return true;
+		if (config.skipCredits && FuriganaPlusCore.isCreditLine(text)) return true;
+		if (config.skipNoKanaLines && !FuriganaPlusCore.hasKana(text)) return true;
 		return false;
 	}
 
@@ -591,7 +603,7 @@
 		while ((node = walker.nextNode())) {
 			const text = node.nodeValue;
 			if (!text || text.length < 2 || text.length > 120) continue;
-			if (!FuriganaCore.hasKana(text)) continue;
+			if (!FuriganaPlusCore.hasKana(text)) continue;
 			if (!isVisible(node.parentElement)) continue; // 藏起来的原生播放页不参与投票
 			let d = 0;
 			for (let p = node.parentElement; p && p !== document.body; p = p.parentElement) {
@@ -922,7 +934,7 @@
 			line.__fgHosts = [];
 			return false;
 		}
-		if (!FuriganaCore.hasKanji(text)) {
+		if (!FuriganaPlusCore.hasKanji(text)) {
 			line.__fgText = text;
 			line.__fgHosts = [];
 			return false;
@@ -937,7 +949,7 @@
 			if (segments) source = 'external';
 		}
 		if (!segments && (config.readingSource === 'romaji' || config.readingSource === 'external') && state.apiRomaji) {
-			const romaji = state.apiRomaji.get(FuriganaCore.lyricKey(text));
+			const romaji = state.apiRomaji.get(FuriganaPlusCore.lyricKey(text));
 			if (romaji) {
 				segments = getSegmentsFromRomaji(text, romaji);
 				if (segments) source = 'romaji';
@@ -1025,7 +1037,7 @@
 			// 制作信息行里的假名（「大原ゆい子」）不算，否则中文歌也会被判成日语歌。
 			const japanese = lines.some((l) => {
 				const t = plainText(l);
-				return !FuriganaCore.isCreditLine(t) && FuriganaCore.hasKana(t);
+				return !FuriganaPlusCore.isCreditLine(t) && FuriganaPlusCore.hasKana(t);
 			});
 			if (!japanese) {
 				removeAll(lastLines);
@@ -1376,8 +1388,8 @@
 	/**
 	 * 量一行的实际排版：注音相对底字偏了多少、词盒被撑宽了多少、
 	 * 逐字歌词是怎么切的。位置不对时靠这个看，比截图准。
-	 *   JPFurigana.dumpLine()   第一行已注音的
-	 *   JPFurigana.dumpLine(2)  第三行
+	 *   JPFuriganaPlus.dumpLine()   第一行已注音的
+	 *   JPFuriganaPlus.dumpLine(2)  第三行
 	 */
 	function dumpLine(index) {
 		const done = lastLines.filter((l) => l.__fgHosts && l.__fgHosts.length);
@@ -1504,7 +1516,7 @@
 	function updateStyles() {
 		spacingVersion++;
 		resetCalibration(); // 注音字号变了，让位的高度也要重量
-		styleEl('jp-furigana-style').textContent = `
+		styleEl('jp-furigana-plus-style').textContent = `
 			.fg-line {
 				display: inline;
 			}
@@ -1635,7 +1647,7 @@
 				const src = l.__fgSource ? `(${l.__fgSource})` : '';
 				const text = plainText(l);
 				console.log(`   [${label}]${src} text:`, JSON.stringify(text));
-				const romaji = state.apiRomaji && state.apiRomaji.get(FuriganaCore.lyricKey(text));
+				const romaji = state.apiRomaji && state.apiRomaji.get(FuriganaPlusCore.lyricKey(text));
 				if (romaji) console.log(`   [${label}] 音译:`, JSON.stringify(romaji));
 				console.log(`   [${label}] html:`, l.outerHTML.slice(0, 600));
 			}
@@ -1692,7 +1704,7 @@
 	// ------------------------------------------------------------------ 设置界面
 
 	// 排障用的部分，只在开发模式下露出来（插件放在 plugins_dev 里，
-	// 或者在控制台执行 localStorage['jp-furigana.dev'] = '1' 后重启）
+	// 或者在控制台执行 localStorage['jp-furigana-plus.dev'] = '1' 后重启）
 	const ADVANCED_UI = `
 		<div class="fg-row"><label><input type="checkbox" data-k="requireLyricClass"> 自动检测时限定在 class 含 "lyric" 的区域内</label></div>
 		<div class="fg-row">
@@ -1727,7 +1739,7 @@
 		'karaoke', 'onlyFirstLine', 'skipCredits', 'skipNoKanaLines', 'requireLyricClass', 'customSelector'];
 	function setConfigValue(key, value) {
 		if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) throw new Error('未知设置项');
-		if (key === 'externalProxy') value = FuriganaExternal.validateProxy(value);
+		if (key === 'externalProxy') value = FuriganaPlusExternal.validateProxy(value);
 		if (key === 'rtSize' || key === 'rtOpacity') {
 			value = Number(value); if (!Number.isFinite(value)) throw new Error('请输入有效数值');
 			value = Math.max(20, Math.min(100, Math.round(value)));
@@ -1754,10 +1766,10 @@
 	}
 	function openExternalSource() {
 		const info = externalClient && externalClient.inspect();
-		if (info && FuriganaExternalCore.allowedURL(info.url)) betterncm.ncm.openUrl(info.url);
+		if (info && FuriganaPlusExternalCore.allowedURL(info.url)) betterncm.ncm.openUrl(info.url);
 	}
 	function fallbackForEdit(text) {
-		const romaji = state.apiRomaji && state.apiRomaji.get(FuriganaCore.lyricKey(text));
+		const romaji = state.apiRomaji && state.apiRomaji.get(FuriganaPlusCore.lyricKey(text));
 		return romaji && getSegmentsFromRomaji(text, romaji) || getSegments(text);
 	}
 	async function toggleEditor() {
@@ -1808,33 +1820,34 @@
 
 	function buildConfigUI() {
 		const root = document.createElement('div');
-		root.id = 'jp-furigana-config';
+		root.id = 'jp-furigana-plus-config';
 		root.innerHTML = `
 			<style>
-				#jp-furigana-config { font-size: 14px; line-height: 2; }
-				#jp-furigana-config h3 { font-size: 16px; font-weight: bold; margin: 12px 0 4px; }
-				#jp-furigana-config .fg-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-				#jp-furigana-config .fg-hint { opacity: .6; font-size: 12px; }
-				#jp-furigana-config .fg-links { display: flex; gap: 16px; margin-bottom: 4px; }
-				#jp-furigana-config .fg-links a { text-decoration: underline; cursor: pointer; opacity: .85; }
-				#jp-furigana-config .fg-links a:hover { opacity: 1; }
-				#jp-furigana-config input[type="text"] { width: 320px; }
-				#jp-furigana-config .fg-external-settings[hidden] { display: none !important; }
-				#jp-furigana-config .fg-external-error { color: #e67e73; font-size: 12px; }
-				#jp-furigana-config .fg-preview {
+				#jp-furigana-plus-config { font-size: 14px; line-height: 2; }
+				#jp-furigana-plus-config h3 { font-size: 16px; font-weight: bold; margin: 12px 0 4px; }
+				#jp-furigana-plus-config .fg-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+				#jp-furigana-plus-config .fg-hint { opacity: .6; font-size: 12px; }
+				#jp-furigana-plus-config .fg-links { display: flex; gap: 16px; margin-bottom: 4px; }
+				#jp-furigana-plus-config .fg-links a { text-decoration: underline; cursor: pointer; opacity: .85; }
+				#jp-furigana-plus-config .fg-links a:hover { opacity: 1; }
+				#jp-furigana-plus-config input[type="text"] { width: 320px; }
+				#jp-furigana-plus-config .fg-external-settings[hidden] { display: none !important; }
+				#jp-furigana-plus-config .fg-external-error { color: #e67e73; font-size: 12px; }
+				#jp-furigana-plus-config .fg-preview {
 					font-size: 26px; padding: 14px 16px; margin: 8px 0;
 					border-radius: 10px; background: rgba(127,127,127,.12);
 				}
-				#jp-furigana-config .fg-status { white-space: pre-wrap; font-family: monospace; font-size: 12px; opacity: .8; }
+				#jp-furigana-plus-config .fg-status { white-space: pre-wrap; font-family: monospace; font-size: 12px; opacity: .8; }
 			</style>
 			<div class="fg-links">
-				<a href="#" data-open="${REPO_URL}">源码仓库</a>
+				<a href="#" data-open="${REPO_URL}/tree/standalone">源码仓库</a>
 				<a href="#" data-open="${REPO_URL}/issues">反馈问题</a>
 			</div>
 
 			<h3>预览</h3>
 			<div class="fg-preview"></div>
 
+			<div class="fg-hint">Plus 为独立维护分支；请只启用 Plus 或原版中的一个。</div>
 			<h3>基本</h3>
 			<div class="fg-row"><label><input type="checkbox" data-k="enabled"> 启用注音</label></div>
 			<div class="fg-row">
@@ -1853,6 +1866,7 @@
 				</select>
 			</div>
 			<section class="fg-external-settings">
+				<div class="fg-hint">外部来源会联网获取并在本地保存歌词，请遵守来源网站使用条款。<a href="#" data-open="https://utaten.com/index/agreement">UtaTen 条款</a> · <a href="#" data-open="https://www.uta-net.com/info/kiyaku.html">歌ネット条款</a></div>
 				<h3>外部歌词</h3>
 				<div class="fg-row"><label>外部网站范围</label><select data-k="externalProvider">
 					<option value="auto">UtaTen 优先，歌ネット备用（推荐）</option>
@@ -2031,10 +2045,31 @@
 
 	// ------------------------------------------------------------------ 入口
 
-	plugin.onConfig(() => buildConfigUI());
+	function originalLoaded(plugins = window.loadedPlugins) {
+		return !!window.JPFurigana || Object.values(plugins || {}).some(p => p && p.manifest && p.manifest.slug === 'jp-furigana');
+	}
+	function conflictPanel() {
+		const box = document.createElement('div');
+		const text = document.createElement('p');
+		text.textContent = '检测到原版「日语歌词振假名」同时加载，Plus 已暂停。请在 BetterNCM 中移除原版后重启网易云，再使用 Plus。原有网站歌词与人工修改文件可以继续使用。';
+		box.append(text);
+		for (const [label, url] of [['源码仓库', REPO_URL + '/tree/standalone'], ['反馈问题', REPO_URL + '/issues']]) {
+			const link = document.createElement('a'); link.href = '#'; link.textContent = label; link.style.marginRight = '16px';
+			link.onclick = event => { event.preventDefault(); betterncm.ncm.openUrl(url); }; box.append(link);
+		}
+		return box;
+	}
+	plugin.onConfig(() => originalLoaded() ? conflictPanel() : buildConfigUI());
 
-	plugin.onLoad(async () => {
-		if (typeof kuromoji === 'undefined' || typeof FuriganaCore === 'undefined') {
+	let started = false;
+	async function start(plugins) {
+		if (started) return;
+		started = true;
+		if (originalLoaded(plugins)) {
+			console.warn(LOG, '检测到原版，Plus 暂停；移除原版后重启即可启用');
+			return;
+		}
+		if (typeof kuromojiFuriganaPlus === 'undefined' || typeof FuriganaPlusCore === 'undefined') {
 			console.error(LOG, 'kuromoji.js / furigana.js 未注入，检查 manifest.json 的 injects 顺序');
 			return;
 		}
@@ -2046,7 +2081,7 @@
 		updateStyles();
 		startObserver();
 		if (config.enabled) loadTokenizer();
-		if (typeof FuriganaEditor !== 'undefined') editor = FuriganaEditor.install({
+		if (typeof FuriganaPlusEditor !== 'undefined') editor = FuriganaPlusEditor.install({
 			songId: getCurrentTrackId,
 			save: (anchor, value) => {
 				if (getCurrentTrackId() !== anchor.songId) return Promise.reject(new Error('歌曲已切换，未保存到其他歌曲'));
@@ -2057,7 +2092,7 @@
 			manage: (row, action) => getExternalClient().manage(row.songId, { ...config, externalCacheDir: row.path.slice(0, row.path.lastIndexOf('/')) }, action),
 			play: playCached,
 		});
-		if (typeof FuriganaRnpSettings !== 'undefined') FuriganaRnpSettings.install({
+		if (typeof FuriganaPlusRnpSettings !== 'undefined') FuriganaPlusRnpSettings.install({
 			config: () => config, set: setConfigValue,
 			status: () => { const info = externalClient && externalClient.inspect(); return { text: compactExternalStatus(),
 				canRetry: config.enabled && config.readingSource === 'external' && !!getCurrentTrackId(), canOpen: !!(info && info.url),
@@ -2066,13 +2101,13 @@
 			retry: retryExternal, openSource: openExternalSource,
 			toggleEditor, openManager: () => editor && editor.openManager(),
 		});
-		window.JPFurigana = {
+		window.JPFuriganaPlus = {
 			config,
 			// 高级项的界面只在开发模式下露出，非开发模式想改就走这里
-			// 例如 JPFurigana.set('customSelector', 'ul.lyric > li > p')
+			// 例如 JPFuriganaPlus.set('customSelector', 'ul.lyric > li > p')
 			set: setConfigValue,
 			state,
-			core: FuriganaCore,
+			core: FuriganaPlusCore,
 			build: BUILD,
 			probe,
 			dumpLine,
@@ -2094,7 +2129,10 @@
 		console.log(
 			LOG,
 			`已加载 ${BUILD}${DEV ? '（开发模式）' : ''}，` +
-				`控制台里可以用 JPFurigana.probe() 看歌词定位、JPFurigana.dumpLine() 看注音排版`
+				`控制台里可以用 JPFuriganaPlus.probe() 看歌词定位、JPFuriganaPlus.dumpLine() 看注音排版`
 		);
-	});
+	}
+	// All plugin manifests are known here, independent of injection order.
+	if (typeof plugin.onAllPluginsLoaded === 'function') plugin.onAllPluginsLoaded(start);
+	else plugin.onLoad(() => start(window.loadedPlugins));
 })();

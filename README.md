@@ -1,6 +1,8 @@
-# 日语歌词振假名 · jp-furigana
+# 日语歌词振假名 Plus · jp-furigana-plus
 
 为网易云音乐 PC 客户端的日语歌词添加振假名，支持 **网易云音译、离线词典、外部歌词网站，以及逐词人工纠音**。
+
+本分支由 CarrotLouis 长期独立维护，商店名称为「日语歌词振假名 Plus」，标识为 `jp-furigana-plus`，在 manifest 中以 `fork_of: "jp-furigana"` 标注来源。独立版以 **`standalone` 分支**发布，`main` 保留向上游贡献的版本。
 
 这是 [Leleawa/jp-furigana](https://github.com/Leleawa/jp-furigana) 的扩展分支，保留上游的词典、罗马音对齐和逐字歌词适配。在此基础上增加网站取词、代理与自动重试、本地歌词管理和 RefinedNowPlayingNext 播放页编辑。相关改动见 [上游 PR #7](https://github.com/Leleawa/jp-furigana/pull/7)。
 
@@ -41,21 +43,21 @@
 
 ### 安装
 
-1. 获取本 fork 的 `.plugin` 包：查看 [Releases](https://github.com/CarrotLouis/jp-furigana/releases)，或按下方方法自行打包。
+1. 获取独立版 `jp-furigana-plus.plugin`：查看 [Releases](https://github.com/CarrotLouis/jp-furigana/releases)，选择明确标注 Plus 的包；也可从 [standalone 的 CI](https://github.com/CarrotLouis/jp-furigana/actions/workflows/ci.yml?query=branch%3Astandalone) 下载 `jp-furigana-plus-plugin` artifact，或按下方方法自行打包。
 2. 退出网易云音乐，将插件包放入实际 BetterNCM 数据目录下的 `plugins/`。默认通常为 `C:\betterncm\plugins`，自定义安装请以实际目录为准。
-3. 如果已经安装上游版或旧版，把旧包备份到插件目录以外，再放入新包；不要同时保留两个 `jp-furigana` 插件包。
-4. 启动网易云，进入「BetterNCM → 插件 → 日语歌词振假名」，将「读音来源」选为 **外部网站**。
+3. 如果已经安装上游版或旧版，把旧包备份到插件目录以外，再放入新包；Plus 与原版功能重叠，请只启用一个版本；检测到原版同时加载时，Plus 会显示冲突提示并暂停。
+4. 启动网易云，进入「BetterNCM → 插件 → 日语歌词振假名 Plus」，将「读音来源」选为 **外部网站**。
 5. 播放日语歌曲并打开歌词页。使用 RNP 3.0.2 时，也可直接在播放页设置的「注音」中调整。
 
 未切换来源时，仍按原来的网易云音译方式注音；选择词典来源则使用内置 kuromoji + IPADIC 推读音。
 
-自行打包只需安装 Node.js，在仓库目录运行：
+自行打包只需安装 Node.js，检出 `standalone` 分支后，在仓库目录运行：
 
 ```sh
 node tools/pack.js
 ```
 
-产物为 `builds/jp-furigana.plugin`，按上述步骤安装即可。
+产物为 `builds/jp-furigana-plus.plugin`，按上述步骤安装即可。
 
 ## 外部网站注音
 
@@ -142,7 +144,7 @@ node tools/pack.js
 <BetterNCM 数据目录>/lyrics/jp-furigana/<网易云歌曲 ID>.json
 ```
 
-可在设置页自定义完整磁盘路径。缓存不放在插件解压目录内，更新插件时可继续复用；更改目录不会自动搬迁原有文件。
+为兼容先前扩展版，此默认目录继续沿用 `jp-furigana`；Plus 的设置、计算缓存及模块标识独立，首次升级会复制旧设置一次并保留原设置。可在设置页自定义完整磁盘路径。缓存不放在插件解压目录内，更新插件时可继续复用；更改目录不会自动搬迁原有文件。
 
 **每首歌始终只有一份歌曲 JSON。** 网站原文与读音保留在原字段中，人工修改额外记录在 `userEdits` 内，不另存一份完整歌词。重新获取网站歌词时也保留人工修改。
 
@@ -159,6 +161,10 @@ node tools/pack.js
 缓存命中后不重复请求歌词网站。仅有人工修改的本地文件也会长期复用，想再次搜索网站时可点击「重新获取当前歌曲」。保存采用临时文件校验与原子替换，降低写入失败导致原文件损坏的风险。
 
 功能不依赖数据库服务，不增加常驻后台服务。网络与保存组件按需运行并退出；原插件自带的离线词典仍会占用内存，实际开销取决于客户端和歌词页面。
+
+## 外部内容与分发
+
+MIT 等代码许可不涵盖网站歌词。歌ネット的[使用条款](https://www.uta-net.com/info/kiyaku.html)限制未经许可的抓取等使用；UtaTen 的[使用条款](https://utaten.com/index/agreement)对个人非营利浏览以外的复制、转载、修改等要求事先书面许可。目前未取得针对本插件的个别书面数据授权，外部自动获取与本地缓存的条款适用仍需另行确认。外部来源默认不启用，发布包不包含实际歌词缓存。完整网络行为、许可和商店审核说明见 [独立维护与分发](docs/distribution.md)。
 
 ## 注音修复与已知限制
 
@@ -178,6 +184,7 @@ node tools/pack.js
 
 ```sh
 npm ci
+npm run check:store
 npm test
 node tools/test-rnp-dom.js slide noruby
 node tools/test-rnp-dom.js lyricbar

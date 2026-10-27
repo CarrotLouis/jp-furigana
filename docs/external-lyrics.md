@@ -2,7 +2,7 @@
 
 ## 使用
 
-1. 安装 [BetterNCM 1.3.4](https://github.com/std-microblock/chromatic/releases/tag/1.3.4)，将本分支的 `jp-furigana.plugin` 放到实际 BetterNCM 数据目录下的 `plugins/`。已装原插件时先退出网易云，备份并替换原包。
+1. 安装 [BetterNCM 1.3.4](https://github.com/std-microblock/chromatic/releases/tag/1.3.4)，将独立版的 `jp-furigana-plus.plugin` 放到实际 BetterNCM 数据目录下的 `plugins/`。已装原版时先退出网易云，备份并移出旧包；Plus 与原版只启用一个版本。
 2. 重启网易云，进入插件设置，将「读音来源」选为「外部网站」。原有默认设置仍为网易云音译。
 3. 播放日语歌并打开歌词页。显示顺序为：网易云音译 / 离线词典 → 外部网站成功匹配的读音。原文字形、翻译和时间轴不替换。
 4. RNP 设置简要显示匹配到的歌名、歌手、来源与人工修改数量；原插件设置页保留详细诊断。「查看来源网页」在系统浏览器打开来源；「重新获取当前歌曲」忽略缓存并重新搜索。
@@ -100,3 +100,5 @@ socks5h://127.0.0.1:1080
 ## 本分支范围
 
 本分支在上游插件内增加网站来源、JSON 人工纠音、缓存管理及读音修复。旧独立原型、SQLite 与常驻本地服务未包含在此 fork。
+
+独立维护分支、配置迁移、外部内容授权状态及商店分发方式见 [独立维护与商店分发](distribution.md)。

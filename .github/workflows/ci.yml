@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, standalone]
   pull_request:
   workflow_dispatch:
 
@@ -51,6 +51,9 @@ jobs:
       - name: 安装测试依赖
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: 独立版分发检查
+        run: npm run check:store
+
       - name: 注音逻辑、外部来源、缓存与漏注音回归
         run: npm test
 
@@ -73,12 +76,12 @@ jobs:
 
       - name: 校验产物
         run: |
-          test -f builds/jp-furigana.plugin
-          unzip -t builds/jp-furigana.plugin
+          test -f builds/jp-furigana-plus.plugin
+          unzip -t builds/jp-furigana-plus.plugin
           # manifest.json 必须在 zip 根层，否则 BetterNCM 认不出来
-          unzip -l builds/jp-furigana.plugin | grep -qE ' manifest\.json$'
+          unzip -l builds/jp-furigana-plus.plugin | grep -qE ' manifest\.json$'
           # 条目名不能有反斜杠（用字符类而不是 '\\'，后者会让 grep 报 Trailing backslash）
-          if unzip -l builds/jp-furigana.plugin | grep -q '[\]'; then
+          if unzip -l builds/jp-furigana-plus.plugin | grep -q '[\]'; then
             echo "条目名里有反斜杠"; exit 1
           fi
           echo "产物校验通过"
@@ -86,6 +89,17 @@ jobs:
       - name: 上传插件包
         uses: actions/upload-artifact@v4
         with:
-          name: jp-furigana-plugin
-          path: builds/jp-furigana.plugin
+          name: jp-furigana-plus-plugin
+          path: builds/jp-furigana-plus.plugin
           if-no-files-found: error
+
+  windows-save:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node tests/cache-write.test.cjs

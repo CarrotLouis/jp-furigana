@@ -18,7 +18,7 @@ const metadata = { id: 1, name: '星の手紙', artists: [{ name: '試験歌手'
 win.document.getElementById('root').__reactContainer$test = { memoizedProps: { store: { getState: () => ({ playing: { resourceTrackId: songId, curTrack: { ...metadata, id: Number(songId) } } }), dispatch() {}, subscribe() {} } } };
 win.plugin = { pluginPath: src, devMode: false, onLoad: f => handlers.load = f, onConfig: f => handlers.config = f };
 win.betterncm = { app: { getBetterNCMVersion: async () => '1.3.4' }, ncm: { openUrl() {} }, fs: { exists: async () => true } };
-win.kuromoji = { builder: () => ({ build: cb => cb(null, { tokenize: text => {
+win.kuromojiFuriganaPlus = { builder: () => ({ build: cb => cb(null, { tokenize: text => {
 	const words = [['恋人', 'コイビト'], ['空', 'ソラ'], ['日', 'ヒ'], ['抗', 'アラガ'], ['沖動', 'オキドウ'], ['暗', 'アン'], ['彼', 'カレ'], ['包', 'ツツ']];
 	const tokens = [];
 	for (let at = 0; at < text.length;) {
@@ -32,7 +32,7 @@ win.fetch = async () => ({ ok: true, json: async () => ({
 	romalrc: { lyric: '[00:01]ko i bi to to so ra wo mi ru\n[00:02]a ra ga e nu o ki do u no a n ga ka re wo tsu tsu n da\n[00:03]so ra wo mi ru hi' }
 }) });
 for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'rnp-settings.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
-win.FuriganaExternal.browserTransport = () => ({
+win.FuriganaPlusExternal.browserTransport = () => ({
 	dataRoot: async () => 'C:/BetterNCM',
 	fs: { mkdir: async () => true, exists: async p => disk.has(p), readFileText: async p => disk.get(p), writeFileText: async (p, value) => { disk.set(p, value); return true; } },
 	parse: html => new win.DOMParser().parseFromString(html, 'text/html'),
@@ -44,7 +44,7 @@ win.FuriganaExternal.browserTransport = () => ({
 		return '<h2 class="newLyricTitle__main">星の手紙<span>歌詞</span></h2><h3><a href="/artist/1">試験歌手</a></h3><div class="lyricBody"><div class="hiragana"><span class="ruby"><span class="rb">恋人</span><span class="rt">あなた</span></span>と<span class="ruby"><span class="rb">空</span><span class="rt">そら</span></span>をみる<br>' + screenshot.html + '</div></div>';
 	}
 });
-win.localStorage.setItem('jp-furigana.config', JSON.stringify({ readingSource: 'external', externalProvider: 'utaten' }));
+win.localStorage.setItem('jp-furigana-plus.config', JSON.stringify({ readingSource: 'external', externalProvider: 'utaten' }));
 win.eval(fs.readFileSync(path.join(src, 'main.js'), 'utf8'));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) { for (let n = 0; n < 100; n++) { if (fn()) return; await sleep(30); } throw new Error('Timed out waiting for plugin'); }
@@ -61,12 +61,12 @@ const assertScreenshot = (mode = 'hiragana') => {
 (async () => {
 	await handlers.load();
 	await until(() => pending && readings().includes('こいびと'));
-	assert.equal(win.JPFurigana.state.srcExternal, 0, 'Official/local fallback visible while website is pending');
+	assert.equal(win.JPFuriganaPlus.state.srcExternal, 0, 'Official/local fallback visible while website is pending');
 	assert(readings(1).includes('あん'), 'Reproduce the old fallback reading before the website is ready');
 	pending();
 	await until(() => readings().includes('あなた'));
-	assert.equal(win.JPFurigana.state.srcExternal, 2);
-	assert.equal(win.JPFurigana.state.srcRomaji, 1, 'An actually unmatched line still falls back');
+	assert.equal(win.JPFuriganaPlus.state.srcExternal, 2);
+	assert.equal(win.JPFuriganaPlus.state.srcRomaji, 1, 'An actually unmatched line still falls back');
 	assertScreenshot();
 	assert([...win.document.querySelectorAll('.translation')].every(n => n.textContent === '保留原来的中文翻译'));
 	const panel = handlers.config(); win.document.body.append(panel);
@@ -77,7 +77,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	const proxy = panel.querySelector('[data-k="externalProxy"]');
 	proxy.value = 'http://user:password@127.0.0.1:7890'; proxy.dispatchEvent(new win.Event('change'));
 	assert(panel.querySelector('.fg-external-error').textContent.includes('账号密码'));
-	assert.equal(win.JPFurigana.config.externalProxy, '');
+	assert.equal(win.JPFuriganaPlus.config.externalProxy, '');
 	// The RNP menu is mounted later than plugin initialization, as in the real client.
 	const rnpMenu = win.document.createElement('div'); rnpMenu.className = 'rnp-settings-menu';
 	rnpMenu.innerHTML = '<div class="rnp-settings-menu-tabs"><div class="rnp-settings-menu-tab" data-tab="lyric">歌词</div><div class="rnp-settings-menu-tab" data-tab="font">字体</div></div><div class="rnp-settings-menu-inner"><div class="rnp-group" data-tab="lyric"></div><div class="rnp-group" data-tab="font"></div></div>';
@@ -85,7 +85,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	await until(() => rnpMenu.querySelector('[data-key="enabled"]'));
 	const beforeStyleChange = requests;
 	const size = rnpMenu.querySelector('[data-key="rtSize"]'); size.value = '70'; size.dispatchEvent(new win.Event('input'));
-	assert.equal(win.JPFurigana.config.rtSize, 70); assert.equal(panel.querySelector('[data-k="rtSize"]').value, '70');
+	assert.equal(win.JPFuriganaPlus.config.rtSize, 70); assert.equal(panel.querySelector('[data-k="rtSize"]').value, '70');
 	assert.equal(requests, beforeStyleChange, 'Appearance changes must not reload external lyrics');
 	const normalSize = panel.querySelector('[data-k="rtSize"]'); normalSize.value = '60'; normalSize.dispatchEvent(new win.Event('input'));
 	assert.equal(size.value, '60', 'Normal settings synchronize back to the RNP menu');
@@ -93,7 +93,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	assert.equal(panel.querySelector('[data-k="externalAutoRetry"]').value, 'off');
 	assert.equal(requests, beforeStyleChange, 'Disabling auto retry does not trigger a new request');
 	const rnpEnabled = rnpMenu.querySelector('[data-key="enabled"]'); rnpEnabled.checked = false; rnpEnabled.dispatchEvent(new win.Event('change'));
-	assert.equal(win.JPFurigana.config.enabled, false); assert(!panel.querySelector('[data-k="enabled"]').checked);
+	assert.equal(win.JPFuriganaPlus.config.enabled, false); assert(!panel.querySelector('[data-k="enabled"]').checked);
 	assert(lyricLines().every(n => !n.querySelector('.fg-rt')));
 	rnpEnabled.checked = true; rnpEnabled.dispatchEvent(new win.Event('change'));
 	await until(() => readings().includes('あなた')); assert.equal(requests, beforeStyleChange);
@@ -115,20 +115,20 @@ const assertScreenshot = (mode = 'hiragana') => {
 	win.document.querySelector('[data-restore]').click(); await until(() => readings().includes('あなた') && !lyricLines()[0].querySelector('.fg-edit-custom'));
 	panel.querySelector('[data-a="editMode"]').click(); await until(() => !win.document.body.classList.contains('fg-edit-mode'));
 	assert.equal(requests, count, 'Edit/save/restore must not fetch lyrics');
-	win.JPFurigana.set('kana', 'katakana');
+	win.JPFuriganaPlus.set('kana', 'katakana');
 	await until(() => readings().includes('アナタ'));
 	assertScreenshot('katakana');
 	assert.equal(requests, count, 'Kana style change reuses disk cache');
-	win.JPFurigana.disable();
+	win.JPFuriganaPlus.disable();
 	assert.equal(baseText(lyricLines()[0]), original);
 	assert.equal(baseText(lyricLines()[1]), screenshot.target);
 	assert(lyricLines().every(n => !n.querySelector('.fg-rt')));
-	pending = null; songId = '2'; win.JPFurigana.enable();
-	await until(() => pending && win.JPFurigana.state.externalTrackId === '2' && readings().includes('コイビト'));
+	pending = null; songId = '2'; win.JPFuriganaPlus.enable();
+	await until(() => pending && win.JPFuriganaPlus.state.externalTrackId === '2' && readings().includes('コイビト'));
 	assert(!readings().includes('アナタ'), 'Previous song must not leak into the next song');
 	assert(!readings(1).includes('ヤミ'), 'Corrected external reading must not leak into a new song');
-	win.JPFurigana.set('readingSource', 'dict'); pending();
-	await sleep(150); win.JPFurigana.pass(); await sleep(150);
+	win.JPFuriganaPlus.set('readingSource', 'dict'); pending();
+	await sleep(150); win.JPFuriganaPlus.pass(); await sleep(150);
 	assert(!readings().includes('アナタ'), 'Disabled external source must ignore late completion');
 	assert(!disk.has('C:/BetterNCM/lyrics/jp-furigana/2.json'));
 	// A song without any website record can still enter editing and persist only corrections.

@@ -1,7 +1,7 @@
 /* External lyric parsing and conservative alignment. No network or persistent state. */
 (function (root, factory) {
 	if (typeof module === 'object' && module.exports) module.exports = factory();
-	else root.FuriganaExternalCore = factory();
+	else root.FuriganaPlusExternalCore = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
 	'use strict';
 	const VARIANTS = { 戀: '恋', 凜: '凛', 墮: '堕', 體: '体', 聲: '声', 會: '会', 變: '変', 歸: '帰', 萬: '万', 盡: '尽', 驅: '駆' };

@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
-globalThis.__FURIGANA_DICT_LOADER__ = p => fs.promises.readFile(p).then(b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+globalThis.__FURIGANA_PLUS_DICT_LOADER__ = p => fs.promises.readFile(p).then(b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 const kuromoji = require('../src/kuromoji.js'), core = require('../src/furigana.js');
 const examples = [
 	['それは二人が出會ったあの日まで 遡る', 'so re wa fu ta ri ga de a tta a no hi ma de sa ka no bo ru', { 出會: 'であ' }],

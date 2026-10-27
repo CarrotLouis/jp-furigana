@@ -11,7 +11,7 @@
 (function (root, factory) {
 	const api = factory();
 	if (typeof module === 'object' && module.exports) module.exports = api;
-	else root.FuriganaCore = api;
+	else root.FuriganaPlusCore = api;
 })(typeof window !== 'undefined' ? window : globalThis, function () {
 	'use strict';
 
