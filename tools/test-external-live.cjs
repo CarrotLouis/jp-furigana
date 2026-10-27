@@ -28,7 +28,7 @@ const bn = {
 		readFileText: p => fs.readFile(p, 'utf8'),
 		writeFileText: async (p, text) => { await fs.writeFile(p, text, 'utf8'); return true; },
 		writeFile: async (p, blob) => { await fs.writeFile(p, Buffer.from(await blob.arrayBuffer())); return true; },
-		remove: async p => { assert(/^request-[a-f0-9]{32}\.json(?:\.(?:partial|cancel))?$/.test(path.basename(p))); await fs.unlink(p); return true; }
+		remove: async p => { assert(/^request-[a-f0-9]{32}\.json(?:\.(?:partial|cancel))?$|^\d{1,20}\.json\.write-[a-f0-9]{32}(?:\.result)?$/.test(path.basename(p))); await fs.unlink(p); return true; }
 	}
 };
 const transport = clientModule.browserTransport(bn, { pluginPath: path.resolve(__dirname, '../src') }, { parse: html => new JSDOM(html).window.document });
@@ -64,6 +64,16 @@ async function testProviders() {
 			assert(client.segments(screenshot.target, 'hiragana').some(s => s.text === '暗' && s.rt === 'やみ'), 'Existing schema-1 caches use the repaired matching too');
 		}
 		report.push({ provider, title: track.title, milliseconds: ms, cacheMilliseconds: Math.round(performance.now() - cacheStart), cacheNetworkRequests: count - before });
+		if (provider === 'utaten' && track.id === tracks[0].id) {
+			const stored = JSON.parse(await fs.readFile(path.join(privateRoot, 'lyrics/jp-furigana/' + track.id + '.json'), 'utf8'));
+			const relaxed = clientModule.create({ ...transport, request: measuredRequest });
+			const alternate = { ...track, artists: ['サウンドホライズン'], lyrics: stored.lines.map(l => l.text) };
+			const startRelaxed = performance.now(), beforeRelaxed = count;
+			await relaxed.load('990000003', async () => alternate, { externalProvider: 'utaten' }, true);
+			assert.equal(relaxed.inspect().source, 'utaten', relaxed.inspect().status);
+			assert.equal(relaxed.inspect().url, stored.url);
+			report.push({ provider, mode: 'title-only-and-lyric-evidence', milliseconds: Math.round(performance.now() - startRelaxed), requests: count - beforeRelaxed });
+		}
 	}
 	return report;
 }

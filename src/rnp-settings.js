@@ -37,9 +37,9 @@
 				select('readingSource', '读音来源', [['romaji', '网易云'], ['dict', '词典'], ['external', '外部网站']]) +
 				'<div data-external>' + select('externalProvider', '外部网站范围', [['auto', '自动'], ['utaten', 'UtaTen'], ['utanet', 'Uta-Net']]) +
 				select('externalAutoRetry', '自动重新获取', [['off', '关闭'], ['failed', '失败后重试']]) +
-				'<p class="fg-rnp-note">自动：UtaTen 优先，Uta-Net 备用。关闭重试不影响首次获取；临时网络故障最多重试 3 次。</p>' +
 				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="retry">重新获取当前歌曲</button><button type="button" class="rnp-select-group-btn" data-action="source">查看来源网页</button></div>' +
-				'<p class="fg-rnp-note" role="status" data-status></p></div>' + slider('rtSize', '注音大小', 60) + slider('rtOpacity', '注音不透明度', 80) +
+				'<p class="fg-rnp-note" role="status" data-status></p></div>' +
+				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="edit">进入编辑模式</button><button type="button" class="rnp-select-group-btn" data-action="manage">本地歌词管理</button></div>' + slider('rtSize', '注音大小', 60) + slider('rtOpacity', '注音不透明度', 80) +
 				'<div class="fg-rnp-subtitle">兼容</div>' + checkbox('karaoke', '逐字歌词模式') + checkbox('onlyFirstLine', '只给原文注音') +
 				checkbox('skipCredits', '跳过制作信息行') + checkbox('skipNoKanaLines', '跳过没有假名的行') + '<p class="fg-rnp-note" role="alert" data-error></p>';
 			lyricTab.after(tab); lyricGroup.after(group);
@@ -66,6 +66,8 @@
 				if (status.textContent !== info.text) status.textContent = info.text;
 				group.querySelector('[data-action="retry"]').disabled = !info.canRetry;
 				group.querySelector('[data-action="source"]').disabled = !info.canOpen;
+				group.querySelector('[data-action="edit"]').disabled = !info.editing && !info.canEdit;
+				group.querySelector('[data-action="edit"]').textContent = info.editing ? '退出编辑模式' : '进入编辑模式';
 			}
 			function commit(key, value) {
 				const error = group.querySelector('[data-error]');
@@ -81,6 +83,8 @@
 				if (button.dataset.reset) commit(button.dataset.reset, Number(group.querySelector('[data-key="' + button.dataset.reset + '"]').getAttribute('default')));
 				if (button.dataset.action === 'retry') api.retry();
 				if (button.dataset.action === 'source') api.openSource();
+				if (button.dataset.action === 'edit') Promise.resolve(api.toggleEditor()).catch(e => { group.querySelector('[data-error]').textContent = e.message; });
+				if (button.dataset.action === 'manage') api.openManager();
 			});
 			// RNP's scroll handler captures a static NodeList before our tab exists.
 			// Update the highlight after its handler, without replacing its navigation.

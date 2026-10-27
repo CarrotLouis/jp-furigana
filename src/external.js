@@ -1,8 +1,8 @@
 /* Lazy website client, on-demand Windows transport and per-song JSON cache. */
 (function (root, factory) {
-	if (typeof module === 'object' && module.exports) module.exports = factory(require('./external-core.js'));
-	else root.FuriganaExternal = factory(root.FuriganaExternalCore);
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
+	if (typeof module === 'object' && module.exports) module.exports = factory(require('./external-core.js'), require('./user-edits.js'));
+	else root.FuriganaExternal = factory(root.FuriganaExternalCore, root.FuriganaUserEdits);
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (core, edits) {
 	'use strict';
 	function validateProxy(value) {
 		const text = String(value || '').trim();
@@ -97,6 +97,31 @@
 		// route uses a narrow std::string, which can fail for Chinese folder names.
 		const storage = { ...bn.fs, writeFileText: (path, text) =>
 			bn.fs.writeFile(path, new Blob([text], { type: 'application/json;charset=utf-8' })) };
+		storage.atomicWrite = async (path, next, expected) => {
+			const bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
+			const job = path + '.write-' + [...bytes].map(n => n.toString(16).padStart(2, '0')).join('');
+			const script = await bn.fs.readFileText(plugin.pluginPath + '/cache-write.ps1');
+			if (!await storage.writeFileText(job, JSON.stringify({ next, expected }))) throw new Error('无法写入临时保存文件');
+			const command = 'powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + command64('& {\n' + script + '\n} ' + toBase64(job));
+			let launched = false, finished = false;
+			try {
+				launched = !!await bn.app.exec(command, false, false);
+				if (!launched) throw new Error('无法启动本地保存组件');
+				const deadline = Date.now() + 15000;
+				while (Date.now() < deadline) {
+					if (await bn.fs.exists(job + '.result')) {
+						const result = JSON.parse(await bn.fs.readFileText(job + '.result')); finished = true;
+						if (!result.ok) throw new Error(result.error);
+						return true;
+					}
+					await sleep(100);
+				}
+				throw new Error('保存组件响应超时，请重新读取确认；输入内容仍保留');
+			} finally {
+				// Do not remove the input of a helper whose completion is still unknown.
+				if (!launched || finished) for (const p of [job, job + '.result']) try { if (await bn.fs.exists(p)) await bn.fs.remove(p); } catch (_) {}
+			}
+		};
 		return { request, dataRoot, fs: storage, parse: html => new DOMParser().parseFromString(html, 'text/html'), ...options };
 	}
 	function create(deps) {
@@ -105,6 +130,26 @@
 		let cancelWait = null, loading = false, lastMetadata = null;
 		const retryDelays = deps.retryDelays || [3000, 8000, 15000];
 		const lineCache = new Map();
+		let writes = Promise.resolve();
+		const exclusive = task => { const p = writes.then(task, task); writes = p.catch(() => {}); return p; };
+		async function read(path, id) {
+			const raw = await deps.fs.readFileText(path);
+			if (raw.length > 2000000) throw new Error('缓存过大');
+			const record = JSON.parse(raw);
+			if (!core.validRecord(record, id)) throw new Error('缓存格式无效');
+			return { raw, record };
+		}
+		async function write(path, record, expected) {
+			const serialized = JSON.stringify(record);
+			if (serialized.length > 2000000) throw new Error('修改后缓存过大');
+			if (deps.fs.atomicWrite) await deps.fs.atomicWrite(path, serialized, expected);
+			else {
+				// Test/non-Windows adapters may supply their own transactional write.
+				try { if (!await deps.fs.writeFileText(path, serialized) || await deps.fs.readFileText(path) !== serialized) throw new Error('缓存写入校验失败'); }
+				catch (e) { if (expected != null) await deps.fs.writeFileText(path, expected); throw e; }
+			}
+			if (await deps.fs.readFileText(path) !== serialized) throw new Error('保存后校验失败，请重新读取');
+		}
 		function announce(text) { status = text; if (deps.onStatus) deps.onStatus(); }
 		const alive = g => g === generation;
 		function cancelRetry() { if (cancelWait) cancelWait(); }
@@ -133,8 +178,11 @@
 		}
 		function accept(record, cached, g, warning = '') {
 			if (!alive(g)) return;
-			current = record; groups = core.prepare(record); lineCache.clear(); source = record.provider;
-			announce((cached ? '本地缓存' : '已获取') + ' · ' + (source === 'utaten' ? 'UtaTen 振假名' : '歌ネット罗马音') + ' · ' + record.lines.length + ' 行' + warning);
+			current = record; lineCache.clear();
+			const scope = lastSettings && lastSettings.externalProvider;
+			source = scope && scope !== 'auto' && record.provider !== scope ? 'local' : record.provider;
+			groups = source === 'local' ? [] : core.prepare(record);
+			announce((cached ? '本地缓存' : '已获取') + ' · ' + (source === 'local' ? '本地人工纠音' : source === 'utaten' ? 'UtaTen 振假名' : '歌ネット罗马音') + ' · ' + record.lines.length + ' 行' + warning);
 			if (deps.onReady) deps.onReady();
 		}
 		async function load(songId, metadata, settings, force = false) {
@@ -169,7 +217,7 @@
 						const raw = await deps.fs.readFileText(path);
 						if (raw.length > 2000000) throw new Error('缓存过大');
 						const record = JSON.parse(raw);
-						if (core.validRecord(record, id) && (settings.externalProvider === 'auto' || !settings.externalProvider || settings.externalProvider === record.provider)) {
+						if (core.validRecord(record, id) && (record.provider === 'local' || settings.externalProvider === 'auto' || !settings.externalProvider || settings.externalProvider === record.provider)) {
 							accept(record, true, g); return;
 						}
 					} catch (_) { /* Invalid or partially-written cache: refetch. */ }
@@ -183,46 +231,141 @@
 				if (settings.externalProxyEnabled && !proxy) throw new Error('请填写代理地址或关闭代理');
 				const providers = settings.externalProvider === 'utaten' ? ['utaten'] : settings.externalProvider === 'utanet' ? ['utanet'] : ['utaten', 'utanet'];
 				const errors = [];
+				let evidence;
+				async function findProvider(provider) {
+					const fetchDoc = async url => deps.parse(await deps.request(url, proxy, () => !alive(g)));
+					let candidates = core.searchResults(await fetchDoc(core.searchURL(provider, track)), provider);
+					const fetched = new Map();
+					async function detail(candidate) {
+						if (fetched.has(candidate.url)) return fetched.get(candidate.url);
+						const url = provider === 'utaten' ? candidate.url : candidate.url.replace('/song/', '/global/en/lyric/');
+						const doc = await fetchDoc(url);
+						const data = provider === 'utaten' ? core.parseUtaten(doc, url) : core.parseUtanet(doc, url, candidate);
+						if (core.titleKey(data.title) !== core.titleKey(track.title)) throw new Error('歌曲页歌名与搜索结果不一致');
+						fetched.set(candidate.url, data); return data;
+					}
+					const exact = candidates.filter(c => core.matches(c, track));
+					if (exact.length === 1) { const data = await detail(exact[0]); if (core.matches(data, track)) return data; }
+					// Relax the artist only after strict matching fails; this remains one attempt.
+					if (provider === 'utaten') candidates = core.searchResults(await fetchDoc(core.searchURL(provider, track, true)), provider);
+					candidates = candidates.filter(c => core.titleKey(c.title) === core.titleKey(track.title));
+					if (!candidates.length) throw new Error('未找到同名歌曲');
+					if (candidates.length > 5) throw new Error('同名候选超过 5 个，未自动套用');
+					if (!evidence) evidence = track.lyrics || (deps.lyrics ? await deps.lyrics(id) : []);
+					if (!evidence.length) throw new Error('歌手写法不同，缺少本曲歌词用于核对');
+					announce('正在用歌词片段核对同名歌曲…');
+					const verified = [];
+					for (const candidate of candidates) {
+						if (!alive(g)) throw new Error('已取消');
+						const data = await detail(candidate);
+						if (core.lyricEvidence(evidence, data).accepted) verified.push(data);
+					}
+					if (verified.length !== 1) throw new Error(verified.length ? '多个版本的歌词均匹配，未自动套用' : '同名歌曲的歌词片段不匹配');
+					return verified[0];
+				}
 				for (const provider of providers) {
 					if (!alive(g)) return;
 					try {
 						announce('正在查询 ' + (provider === 'utaten' ? 'UtaTen' : '歌ネット') + '，暂用网易云音译 / 词典…');
-						const fetchDoc = async url => deps.parse(await attempt(() => deps.request(url, proxy, () => !alive(g)),
-							(provider === 'utaten' ? 'UtaTen' : '歌ネット') + (url.includes('/search') ? ' 搜索' : ' 歌词页')));
-						const search = await fetchDoc(core.searchURL(provider, track));
+						const data = await attempt(() => findProvider(provider), provider === 'utaten' ? 'UtaTen 获取流程' : '歌ネット获取流程');
 						if (!alive(g)) return;
-						const candidates = core.searchResults(search, provider).filter(c => core.matches(c, track));
-						if (candidates.length !== 1) throw new Error(candidates.length ? '存在多个同名版本，未自动套用' : '未找到歌名与歌手都匹配的结果');
-						const candidate = candidates[0];
-						const url = provider === 'utaten' ? candidate.url : candidate.url.replace('/song/', '/global/en/lyric/');
-						const doc = await fetchDoc(url);
-						if (!alive(g)) return;
-						const data = provider === 'utaten' ? core.parseUtaten(doc, url) : core.parseUtanet(doc, url, candidate);
-						if (!core.matches(data, track)) throw new Error('歌曲页的歌名 / 歌手与搜索结果不一致');
 						const record = { schema: 1, songId: id, fetchedAt: new Date().toISOString(), ...data };
 						if (!core.validRecord(record, id)) throw new Error('网站歌词格式校验失败');
 						let warning = '';
 						try {
-							const serialized = JSON.stringify(record);
-							if (!await deps.fs.writeFileText(path, serialized) || await deps.fs.readFileText(path) !== serialized) throw new Error('缓存写入校验失败');
+							await exclusive(async () => {
+								if (!alive(g)) return;
+								const previous = await deps.fs.exists(path) ? await deps.fs.readFileText(path) : null;
+								if (previous) try { const saved = JSON.parse(previous); if (saved.userEdits !== undefined) record.userEdits = saved.userEdits; } catch (_) {}
+								await write(path, record, previous);
+							});
 						} catch (_) { warning = '（缓存写入失败，本次仍可显示）'; }
 						accept(record, false, g, warning); return;
 					} catch (error) { errors.push((provider === 'utaten' ? 'UtaTen' : '歌ネット') + '：' + error.message); }
 				}
 				if (alive(g)) announce(errors.join('\n') + '\n继续使用网易云音译 / 词典；可手动重试');
 			} catch (error) { if (alive(g)) announce(error.message + '；继续使用网易云音译 / 词典'); }
-			finally { if (alive(g)) loading = false; }
+			finally { if (alive(g)) { loading = false; if (deps.onStatus) deps.onStatus(); } }
 		}
 		function segments(text, mode, fromRomaji) {
-			if (!current) return null;
+			if (!current || source === 'local') return null;
 			const k = mode + '|' + text;
 			if (!lineCache.has(k)) {
 				if (lineCache.size > 1000) lineCache.clear();
-				lineCache.set(k, core.segmentsFor(text, groups, mode, fromRomaji));
+				lineCache.set(k, edits.annotate(current, text, core.segmentsFor(text, groups, mode, fromRomaji), mode));
 			}
 			return lineCache.get(k);
 		}
-		return { load, stop, setAutoRetry, segments, inspect: () => ({ songId: currentId, status, cachePath, source, loading, waitingRetry: !!cancelWait, url: current && current.url, settings: lastSettings }) };
+		function fallbackSegments(text, segments, mode) {
+			if (!current) return segments;
+			return edits.annotate({ ...current, provider: 'local', url: '' }, text, segments, mode);
+		}
+		async function ensureLocal(songId, metadata, settings) {
+			if (current && currentId === songId) return;
+			reset(); const g = generation; currentId = songId; lastSettings = { ...settings };
+			const dir = await directory(settings), path = dir + '/' + songId + '.json';
+			if (!/^\d{1,20}$/.test(songId)) throw new Error('无效歌曲 ID');
+			await exclusive(async () => {
+				if (!alive(g)) throw new Error('歌曲已变化');
+				let record;
+				if (await deps.fs.exists(path)) record = (await read(path, songId)).record;
+				else {
+					const track = await metadata();
+					record = { schema: 1, songId, provider: 'local', url: '', title: track.title, artists: track.artists || [], lines: [], userEdits: [] };
+					if (!alive(g)) throw new Error('歌曲已变化');
+					await write(path, record, null);
+				}
+				cachePath = dir; accept(record, true, g);
+			});
+		}
+		async function saveEdit(anchor, value, fromRomaji, fallback) {
+			if (!current || currentId !== anchor.songId || anchor.provider !== 'local' && (source !== anchor.provider || current.url !== anchor.url)) throw new Error('歌曲或来源已变化，请重新选择注音');
+			const path = cachePath + '/' + currentId + '.json', g = generation;
+			return exclusive(async () => {
+				if (!alive(g)) throw new Error('歌曲已变化，未保存');
+				const { raw, record } = await read(path, anchor.songId);
+				const local = anchor.provider === 'local';
+				const baseline = edits.annotate(local ? { ...record, provider: 'local', url: '' } : record, anchor.line,
+					local ? fallback(anchor.line) : core.segmentsFor(anchor.line, core.prepare(record), 'hiragana', fromRomaji), 'hiragana');
+				const match = baseline && baseline.find(s => s.edit && edits.key(s.edit) === edits.key(anchor));
+				if (!match || match.edit.reading !== anchor.reading) throw new Error('本地读音已变化，请取消后重新打开编辑框');
+				const next = edits.update(record, anchor, value);
+				await write(path, next, raw);
+				accept(next, true, g); return next;
+			});
+		}
+		async function list(settings) {
+			const dir = await directory(settings), rows = [];
+			for (const entry of await deps.fs.readDir(dir)) {
+				const name = String(entry).replace(/\\/g, '/').split('/').pop();
+				if (!/^\d{1,20}\.json$/.test(name)) continue;
+				try {
+					const { raw, record } = await read(dir + '/' + name, name.slice(0, -5));
+					rows.push({ songId: record.songId, title: record.title, artists: record.artists, provider: record.provider,
+						bytes: new TextEncoder().encode(raw).length, edits: edits.items(record).length, path: dir + '/' + name });
+				} catch (_) { rows.push({ songId: name.slice(0, -5), title: name, artists: [], invalid: true, bytes: 0, edits: 0 }); }
+				if (rows.length % 25 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+			}
+			return { dir, rows };
+		}
+		async function manage(songId, settings, action) {
+			if (!/^\d{1,20}$/.test(songId)) throw new Error('无效歌曲 ID');
+			const dir = await directory(settings), path = dir + '/' + songId + '.json';
+			return exclusive(async () => {
+				const { raw, record } = await read(path, songId);
+				if (action === 'read') return record;
+				const selected = currentId === songId && cachePath === dir;
+				if (action === 'delete') {
+					if (selected) stop();
+					if (!await deps.fs.remove(path)) throw new Error('删除失败');
+					if (deps.onReady) deps.onReady();
+				} else if (action === 'restore') {
+					const next = { ...record, userEdits: [] }; await write(path, next, raw);
+					if (selected) accept(next, true, generation);
+				} else throw new Error('未知管理操作');
+			});
+		}
+		return { load, stop, setAutoRetry, segments, fallbackSegments, ensureLocal, saveEdit, list, manage, directory, inspect: () => ({ songId: currentId, status, cachePath, source, loading, waitingRetry: !!cancelWait, url: source === 'local' ? '' : current && current.url, ready: !!current, title: current && current.title, artists: current && current.artists, edits: current ? edits.items(current).length : 0, settings: lastSettings }) };
 	}
 	return { create, browserTransport, validateProxy, requestError };
 });

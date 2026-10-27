@@ -31,9 +31,12 @@ const SRC_FILES = [
 	'main.js',
 	'furigana.js',
 	'external-core.js',
+	'user-edits.js',
 	'external.js',
+	'editor.js',
 	'rnp-settings.js',
 	'external-fetch.ps1',
+	'cache-write.ps1',
 	'kuromoji.js',
 	'preview.jpg',
 	// kuromoji 和 IPADIC 的许可要求随附声明，所以这三个也得进包

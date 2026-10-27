@@ -12,6 +12,7 @@ const karaoke = '<div id="rnp-view"><div class="rnp-lyrics">' + texts.map(text =
 	'</div><div class="translation rnp-lyrics-line-translated">保留原来的中文翻译</div></div>').join('') + '</div></div>';
 const dom = new JSDOM('<body><div id="root">' + (rnp ? '<div class="g-single" style="visibility:hidden">' + native + '</div>' : native) + '</div>' + (rnp ? karaoke : '') + '</body>', { runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://music.163.com/' });
 const win = dom.window, handlers = {}, disk = new Map();
+win.TextEncoder = TextEncoder;
 let songId = '1', pending, requests = 0;
 const metadata = { id: 1, name: '星の手紙', artists: [{ name: '試験歌手' }] };
 win.document.getElementById('root').__reactContainer$test = { memoizedProps: { store: { getState: () => ({ playing: { resourceTrackId: songId, curTrack: { ...metadata, id: Number(songId) } } }), dispatch() {}, subscribe() {} } } };
@@ -30,7 +31,7 @@ win.fetch = async () => ({ ok: true, json: async () => ({
 	lrc: { lyric: texts.map((text, i) => '[00:0' + (i + 1) + ']' + text).join('\n') },
 	romalrc: { lyric: '[00:01]ko i bi to to so ra wo mi ru\n[00:02]a ra ga e nu o ki do u no a n ga ka re wo tsu tsu n da\n[00:03]so ra wo mi ru hi' }
 }) });
-for (const file of ['furigana.js', 'external-core.js', 'external.js', 'rnp-settings.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
+for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'rnp-settings.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
 win.FuriganaExternal.browserTransport = () => ({
 	dataRoot: async () => 'C:/BetterNCM',
 	fs: { mkdir: async () => true, exists: async p => disk.has(p), readFileText: async p => disk.get(p), writeFileText: async (p, value) => { disk.set(p, value); return true; } },
@@ -97,6 +98,23 @@ const assertScreenshot = (mode = 'hiragana') => {
 	rnpEnabled.checked = true; rnpEnabled.dispatchEvent(new win.Event('change'));
 	await until(() => readings().includes('あなた')); assert.equal(requests, beforeStyleChange);
 	const count = requests;
+	// Edit the actual rendered annotation; the RNP filler must mirror the change.
+	panel.querySelector('[data-a="editMode"]').click();
+	await until(() => win.document.body.classList.contains('fg-edit-mode'));
+	let word = lyricLines()[0].querySelector('.fg-ruby[data-fg-editable]');
+	word.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+	let input = win.document.querySelector('.fg-editor-pop [data-reading]');
+	assert(input); input.value = 'きみ'; input.dispatchEvent(new win.Event('input'));
+	input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+	await until(() => lyricLines()[0].querySelector('.fg-edit-custom')?.textContent === 'きみ');
+	assert.equal(lyricLines()[0].querySelector('.fg-edit-original').textContent, 'あなた');
+	assert.equal(baseText(lyricLines()[0]), original);
+	if (rnp) assert(lyricLines()[0].querySelector('.rnp-karaoke-word-filler .fg-edit-custom'));
+	assert.equal(JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).userEdits[0].reading, 'きみ');
+	word = lyricLines()[0].querySelector('.fg-ruby[data-fg-editable]'); word.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+	win.document.querySelector('[data-restore]').click(); await until(() => readings().includes('あなた') && !lyricLines()[0].querySelector('.fg-edit-custom'));
+	panel.querySelector('[data-a="editMode"]').click(); await until(() => !win.document.body.classList.contains('fg-edit-mode'));
+	assert.equal(requests, count, 'Edit/save/restore must not fetch lyrics');
 	win.JPFurigana.set('kana', 'katakana');
 	await until(() => readings().includes('アナタ'));
 	assertScreenshot('katakana');
@@ -113,5 +131,15 @@ const assertScreenshot = (mode = 'hiragana') => {
 	await sleep(150); win.JPFurigana.pass(); await sleep(150);
 	assert(!readings().includes('アナタ'), 'Disabled external source must ignore late completion');
 	assert(!disk.has('C:/BetterNCM/lyrics/jp-furigana/2.json'));
+	// A song without any website record can still enter editing and persist only corrections.
+	panel.querySelector('[data-a="editMode"]').click();
+	await until(() => win.document.body.classList.contains('fg-edit-mode') && lyricLines()[0].querySelector('[data-fg-editable]'));
+	word = lyricLines()[0].querySelector('[data-fg-editable]'); word.dispatchEvent(new win.MouseEvent('click', { bubbles: true }));
+	input = win.document.querySelector('[data-reading]'); assert(input); input.value = 'きみ'; input.dispatchEvent(new win.Event('input'));
+	input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+	await until(() => JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/2.json') || '{}').userEdits?.length === 1);
+	const local = JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/2.json'));
+	assert.equal(local.provider, 'local'); assert.deepEqual(local.lines, []);
+	assert.equal(local.userEdits[0].reading, 'きみ'); assert.equal(baseText(lyricLines()[0]), original);
 	console.log('Integration tests passed (' + (rnp ? 'RNP split karaoke and filler' : 'native DOM') + '): screenshot correction, immediate fallback, async replacement, translations, settings, cached kana toggle, disable restore, track isolation and late-result cancellation.');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => win.close());

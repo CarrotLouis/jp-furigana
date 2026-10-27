@@ -46,11 +46,11 @@
 				['utaten.com', 'www.utaten.com', 'www.uta-net.com', 'uta-net.com'].includes(u.hostname);
 		} catch (_) { return false; }
 	}
-	function searchURL(provider, track) {
+	function searchURL(provider, track, titleOnly = false) {
 		const title = queryTitle(track.title);
 		if (!title || title.length > 200) throw new Error('缺少可搜索的歌名');
 		return provider === 'utaten'
-			? 'https://utaten.com/search?title=' + encodeURIComponent(title) + '&artist_name=' + encodeURIComponent(track.artists[0] || '')
+			? 'https://utaten.com/search?title=' + encodeURIComponent(title) + (titleOnly ? '' : '&artist_name=' + encodeURIComponent(track.artists[0] || ''))
 			: 'https://www.uta-net.com/search/?Aselect=2&Bselect=3&Keyword=' + encodeURIComponent(title);
 	}
 	function searchResults(doc, provider) {
@@ -126,6 +126,7 @@
 		return { provider: 'utanet', url, title: candidate.title, artists, lines: jp.map((text, i) => ({ text, romaji: roma[i] })) };
 	}
 	function validRecord(record, id) {
+		if (record && record.schema === 1 && record.songId === String(id) && record.provider === 'local') return record.url === '' && Array.isArray(record.lines) && record.lines.length === 0 && typeof record.title === 'string' && Array.isArray(record.artists) && record.artists.every(a => typeof a === 'string');
 		if (!record || record.schema !== 1 || record.songId !== String(id) || !['utaten', 'utanet'].includes(record.provider) || !allowedURL(record.url)) return false;
 		if (new URL(record.url).hostname.replace(/^www\./, '') !== (record.provider === 'utaten' ? 'utaten.com' : 'uta-net.com')) return false;
 		if (!Array.isArray(record.lines) || !record.lines.length || record.lines.length > 2000) return false;
@@ -213,5 +214,13 @@
 		// Repeated identical text with different readings is ambiguous without timestamps.
 		return versions.size === 1 ? versions.values().next().value : null;
 	}
-	return { key, titleKey, queryTitle, matches, allowedURL, searchURL, searchResults, parseUtaten, parseUtanet, validRecord, prepare, segmentsFor, kana };
+	function lyricEvidence(lines, record) {
+		const normalize = s => indexed(s).key;
+		const targets = [...new Set((lines || []).filter(s => typeof s === 'string' && !/作詞|作曲|編曲|作词|作曲|编曲|lyrics|composer|arrang/i.test(s)).map(normalize))].filter(s => s.length >= 8 && /[ぁ-ゖァ-ヶ一-龯]/.test(s));
+		const sources = prepare(record).map(g => g.key);
+		const found = targets.filter(t => sources.some(s => s === t || t.length >= 12 && s.includes(t)));
+		const characters = found.reduce((n, s) => n + s.length, 0);
+		return { hits: found.length, characters, accepted: found.length >= 2 && characters >= 24 && found.length / Math.min(8, targets.length) >= .25 };
+	}
+	return { key, titleKey, queryTitle, matches, allowedURL, searchURL, searchResults, parseUtaten, parseUtanet, validRecord, prepare, segmentsFor, kana, lyricEvidence };
 });

@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'external-lyrics-4';
+	const BUILD = 'external-lyrics-5';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -387,6 +387,7 @@
 		const json = await res.json();
 		const lrc = json.lrc && json.lrc.lyric;
 		const roma = json.romalrc && json.romalrc.lyric;
+		if (lrc && getCurrentTrackId() === trackId) state.evidence = { songId: trackId, lines: lrc.split(/\r?\n/).map(l => l.replace(/\[[^\]]*\]/g, '').trim()).filter(Boolean) };
 		if (!lrc || !roma) return new Map(); // 这首没有官方音译
 		return FuriganaCore.buildRomajiMap(lrc, roma);
 	}
@@ -421,10 +422,17 @@
 
 	// ------------------------------------------------------ 外部网站（按需联网）
 	let externalClient = null;
+	let editor = null, playPending = false;
 	function getExternalClient() {
 		if (!externalClient && typeof FuriganaExternal !== 'undefined') {
 			externalClient = FuriganaExternal.create({
 				...FuriganaExternal.browserTransport(betterncm, plugin),
+				lyrics: async id => {
+					if (state.evidence && state.evidence.songId === id) return state.evidence.lines;
+					const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 8000);
+					try { const response = await fetch(LYRIC_API + encodeURIComponent(id), { signal: abort.signal }); if (!response.ok) throw new Error('歌词信息 HTTP ' + response.status); const data = await response.json(); return String(data.lrc && data.lrc.lyric || '').split(/\r?\n/).map(l => l.replace(/\[[^\]]*\]/g, '').trim()).filter(Boolean); }
+					finally { clearTimeout(timer); }
+				},
 				onReady: () => { invalidateAll(); schedule(0); notifyConfigUI(); },
 				onStatus: () => notifyConfigUI(),
 			});
@@ -721,21 +729,23 @@
 				hide.style.display = 'none';
 				hide.textContent = seg.text;
 				wrap.appendChild(hide);
-			} else if (seg.rt) {
+			} else if (seg.rt || seg.edit) {
 				// 每个注音单独套一层 inline-block：整行改写时 .fg-line 是 display:inline，
 				// 上下边距对它不起作用，没法把行盒多出来的高度收回去（见 calibrate）
 				const holder = document.createElement('span');
 				holder.className = 'fg-ruby';
+				holder.__fgBase = seg.text;
+				if (seg.edit) { holder.__fgEdit = seg.edit; holder.dataset.fgEditable = 'true'; }
 				const rt = document.createElement('span');
 				rt.className = 'fg-rt';
-				rt.textContent = seg.rt;
+				rt.textContent = seg.rt || '';
 				if (hasRuby()) {
 					// 有 ruby 排版就用真 ruby，断行、避让都交给内核
 					const ruby = document.createElement('ruby');
 					ruby.appendChild(document.createTextNode(seg.text));
 					const realRt = document.createElement('rt');
 					realRt.className = 'fg-rt';
-					realRt.textContent = seg.rt;
+					realRt.textContent = seg.rt || '';
 					ruby.appendChild(realRt);
 					holder.appendChild(ruby);
 				} else {
@@ -744,6 +754,16 @@
 					holder.appendChild(document.createTextNode(seg.text));
 					holder.appendChild(rt);
 				}
+				const annotation = holder.querySelector('.fg-rt'); annotation.textContent = '';
+				const stack = document.createElement('span'); stack.className = 'fg-edit-stack';
+				const current = document.createElement('span'); current.className = 'fg-reading'; current.textContent = seg.rt || '';
+				stack.append(current);
+				if (seg.originalRt != null) {
+					current.classList.add('fg-edit-custom');
+					const original = document.createElement('del'); original.className = 'fg-edit-original'; original.textContent = seg.originalRt || '未注音';
+					stack.append(original);
+				}
+				annotation.append(stack);
 				wrap.appendChild(holder);
 			} else {
 				wrap.appendChild(document.createTextNode(seg.text));
@@ -832,7 +852,7 @@
 			if (!text) continue;
 			// 注音只在完整包含、或至少包含词首的那一段上保留
 			const keepRt = seg.rt && a === start;
-			if (keepRt) out.push({ text, rt: seg.rt });
+			if (keepRt || seg.edit && a === start) out.push({ ...seg, text });
 			else if (seg.hidden) out.push({ text, hidden: true });
 			else out.push({ text });
 		}
@@ -924,8 +944,9 @@
 			}
 		}
 		if (!segments) segments = getSegments(text);
+		if (source !== 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) segments = externalClient.fallbackSegments(text, segments, config.kana);
 
-		if (!segments.some((s) => s.rt)) {
+		if (!segments.some((s) => s.rt || editor && editor.isEnabled() && s.edit)) {
 			line.__fgText = text;
 			line.__fgHosts = [];
 			line.__fgSource = null;
@@ -987,6 +1008,7 @@
 	}
 
 	function pass() {
+		if (editor) editor.sync();
 		if (!config.enabled || !state.tokenizer) return;
 		const t0 = performance.now();
 		try {
@@ -1048,6 +1070,7 @@
 				resetCalibration(); // 换歌/换行了，重新量一次
 				requestRecalc();
 			}
+			spaceAnnotations(lines);
 			calibrate();
 			state.annotated = annotated;
 			const previousSources = [state.srcRomaji, state.srcDict, state.srcExternal].join('|');
@@ -1444,7 +1467,42 @@
 		return el;
 	}
 
+	let spacingVersion = 1, spacingCanvas = null;
+	function spaceAnnotations(lines) {
+		if (typeof CanvasRenderingContext2D === 'undefined') return; // DOM-only test environments
+		if (!spacingCanvas) spacingCanvas = document.createElement('canvas').getContext('2d');
+		if (!spacingCanvas) return;
+		let resized = false;
+		for (const line of lines) {
+			const holders = line.querySelectorAll('.fg-ruby');
+			if (!holders.length) continue;
+			const sample = getComputedStyle(holders[0]);
+			const fontKey = [sample.fontFamily, sample.fontSize, sample.fontWeight, sample.fontStyle, sample.letterSpacing].join('|');
+			if (line.__fgSpacingVersion === spacingVersion && line.__fgSpacingFont === fontKey && line.__fgSpacingWrap === line.querySelector('.fg-line')) continue;
+			for (const holder of holders) {
+				const rt = holder.querySelector('.fg-rt'); if (!rt || !rt.textContent) continue;
+				const baseStyle = getComputedStyle(holder), rtStyle = getComputedStyle(rt), size = parseFloat(baseStyle.fontSize);
+				if (!size) continue;
+				const measure = (text, css) => { spacingCanvas.font = css.font || `${css.fontStyle} ${css.fontWeight} ${css.fontSize} ${css.fontFamily}`; return spacingCanvas.measureText(text).width + Math.max(0, text.length - 1) * (parseFloat(css.letterSpacing) || 0); };
+				const baseWidth = measure(holder.__fgBase || '', baseStyle);
+				const custom = rt.querySelector('.fg-edit-custom'), original = rt.querySelector('.fg-edit-original');
+				const currentWidth = measure(custom ? custom.textContent : rt.textContent, rtStyle);
+				let rtWidth = currentWidth, inFlowWidth = currentWidth;
+				if (original && editor && editor.isEnabled()) {
+					inFlowWidth = measure(original.textContent, rtStyle);
+					rtWidth = Math.max(rtWidth, inFlowWidth);
+				}
+				// Native ruby reserves its own width. The absolute-position fallback does not.
+				const padding = size * .08 + Math.max(0, rtWidth - (hasRuby() ? Math.max(baseWidth, inFlowWidth) : baseWidth)) / 2;
+				holder.style.paddingLeft = holder.style.paddingRight = padding.toFixed(2) + 'px';
+				resized = true;
+			}
+			line.__fgSpacingVersion = spacingVersion; line.__fgSpacingFont = fontKey; line.__fgSpacingWrap = line.querySelector('.fg-line');
+		}
+		if (resized) requestRecalc();
+	}
 	function updateStyles() {
+		spacingVersion++;
 		resetCalibration(); // 注音字号变了，让位的高度也要重量
 		styleEl('jp-furigana-style').textContent = `
 			.fg-line {
@@ -1480,6 +1538,7 @@
 				ruby-position: over;
 				-webkit-ruby-position: before;
 				ruby-align: center;
+				ruby-overhang: none;
 			}
 			/*
 			 * 内核不认 ruby 时的降级：不用 ruby/rt，注音是普通 span 绝对定位在底字正上方。
@@ -1697,6 +1756,55 @@
 		const info = externalClient && externalClient.inspect();
 		if (info && FuriganaExternalCore.allowedURL(info.url)) betterncm.ncm.openUrl(info.url);
 	}
+	function fallbackForEdit(text) {
+		const romaji = state.apiRomaji && state.apiRomaji.get(FuriganaCore.lyricKey(text));
+		return romaji && getSegmentsFromRomaji(text, romaji) || getSegments(text);
+	}
+	async function toggleEditor() {
+		if (!editor) return;
+		if (editor.isEnabled()) { editor.setEnabled(false); return; }
+		const id = getCurrentTrackId();
+		if (!id || !state.tokenizer) throw new Error('请先播放歌曲，并等待词典加载完成');
+		if (!config.enabled) setConfigValue('enabled', true);
+		if (config.readingSource !== 'external') setConfigValue('readingSource', 'external');
+		const client = getExternalClient();
+		state.externalTrackId = id;
+		await client.ensureLocal(id, () => currentTrackMetadata(id), config);
+		if (getCurrentTrackId() !== id) throw new Error('歌曲已切换，请重试');
+		state.externalTrackId = id; editor.setEnabled(true);
+	}
+	async function playCached(row) {
+		if (playPending) throw new Error('正在切换歌曲，请稍候');
+		if (!/^\d{1,20}$/.test(row.songId)) throw new Error('无效歌曲 ID');
+		if (!editor.prepareNavigation()) throw new Error('请先处理未保存的注音');
+		playPending = true;
+		try {
+			const client = getExternalClient(), dir = await client.directory(config);
+			if (row.path !== dir + '/' + row.songId + '.json') throw new Error('缓存目录已变化，请刷新列表');
+			await client.manage(row.songId, config, 'read');
+			if (getCurrentTrackId() !== row.songId) {
+				betterncm.ncm.openUrl('orpheus://song/' + row.songId + '/?autoplay=1');
+				const end = Date.now() + 15000;
+				while (getCurrentTrackId() !== row.songId && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 150));
+				if (getCurrentTrackId() !== row.songId) throw new Error('客户端尚未切换到这首歌；请手动播放后再进入编辑模式');
+			}
+			setConfigValue('enabled', true);
+			if (row.provider !== 'local') setConfigValue('externalProvider', row.provider);
+			setConfigValue('readingSource', 'external');
+			state.externalTrackId = row.songId;
+			await client.ensureLocal(row.songId, () => currentTrackMetadata(row.songId), config);
+			if (getCurrentTrackId() !== row.songId) throw new Error('歌曲已变化，请重试');
+			state.externalTrackId = row.songId; editor.setEnabled(true);
+		} finally { playPending = false; }
+	}
+	function compactExternalStatus() {
+		const info = externalClient && externalClient.inspect();
+		if (!info) return '等待播放歌曲';
+		if (info.ready) return (info.source === 'local' ? '本地纠音' : info.source === 'utaten' ? 'UtaTen' : 'Uta-Net') + ' · ' + info.title + '\n' + (info.artists || []).join(' / ') + (info.edits ? '\n人工修改 ' + info.edits + ' 处' : '');
+		if (info.waitingRetry) return '获取失败，等待自动重试';
+		if (info.loading) return '正在获取外部歌词…';
+		return '暂未获取网站歌词，可手动编辑';
+	}
 
 	function buildConfigUI() {
 		const root = document.createElement('div');
@@ -1755,7 +1863,7 @@
 					<option value="off">关闭（仍会首次获取）</option>
 					<option value="failed">失败后自动重试（最多 3 次）</option>
 				</select></div>
-				<div class="fg-hint">超时等临时网络故障按 3 / 8 / 15 秒间隔重试失败的请求；关闭后取消等待。没有匹配歌曲、网页格式错误或 HTTP 403 等情况不自动反复请求。</div>
+				<div class="fg-hint">超时等临时网络故障按 3 / 8 / 15 秒间隔重试获取流程；歌名与歌词核对属于同一次尝试。关闭后取消等待。没有匹配歌曲、网页格式错误或 HTTP 403 等情况不自动反复请求。</div>
 				<div class="fg-row"><label><input type="checkbox" data-k="externalProxyEnabled"> 使用代理获取外部歌词</label></div>
 				<div class="fg-row"><label>代理地址</label><input type="text" data-k="externalProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false"></div>
 				<div class="fg-hint">支持 HTTP / HTTPS / SOCKS5 / SOCKS5H；仅影响外部歌词网站，不改变网易云联网方式。不支持带账号密码的代理 URL。</div>
@@ -1766,6 +1874,7 @@
 				<div class="fg-external-status" role="status" style="white-space:pre-wrap;font-size:12px;margin:8px 0"></div>
 				<div class="fg-row"><button data-a="externalRetry">重新获取当前歌曲</button><button data-a="externalSource">查看来源网页</button></div>
 			</section>
+			<div class="fg-row"><button data-a="editMode">进入编辑模式</button><button data-a="cacheManager">本地歌词管理</button></div>
 			<div class="fg-row">
 				<label>注音大小</label>
 				<input type="range" data-k="rtSize" min="20" max="100" step="1">
@@ -1809,6 +1918,9 @@
 			if (externalStatus.textContent !== text) externalStatus.textContent = text;
 			root.querySelector('[data-a="externalSource"]').disabled = !(info && info.url);
 			root.querySelector('[data-a="externalRetry"]').disabled = !config.enabled || !getCurrentTrackId();
+			const editButton = root.querySelector('[data-a="editMode"]');
+			editButton.textContent = editor && editor.isEnabled() ? '退出编辑模式' : '进入编辑模式';
+			editButton.disabled = !(editor && editor.isEnabled()) && (!getCurrentTrackId() || !state.tokenizer);
 			if (!status) return; // 非开发模式没有这块
 			status.textContent = [
 				`词典：${state.tokenizer ? '已就绪' : state.loadError ? '失败 ' + state.loadError : '加载中'}`,
@@ -1866,6 +1978,8 @@
 		};
 		onClick('externalRetry', retryExternal);
 		onClick('externalSource', openExternalSource);
+		onClick('editMode', () => toggleEditor().catch(e => { root.querySelector('.fg-external-error').textContent = e.message; }));
+		onClick('cacheManager', () => editor && editor.openManager());
 		onClick('rescan', () => {
 			rescan();
 			setTimeout(refreshStatus, 500);
@@ -1932,12 +2046,25 @@
 		updateStyles();
 		startObserver();
 		if (config.enabled) loadTokenizer();
+		if (typeof FuriganaEditor !== 'undefined') editor = FuriganaEditor.install({
+			songId: getCurrentTrackId,
+			save: (anchor, value) => {
+				if (getCurrentTrackId() !== anchor.songId) return Promise.reject(new Error('歌曲已切换，未保存到其他歌曲'));
+				return getExternalClient().saveEdit(anchor, value, getSegmentsFromRomaji, fallbackForEdit);
+			},
+			changed: () => { updateStyles(); invalidateAll(); schedule(0); notifyConfigUI(); },
+			list: () => getExternalClient().list({ ...config }),
+			manage: (row, action) => getExternalClient().manage(row.songId, { ...config, externalCacheDir: row.path.slice(0, row.path.lastIndexOf('/')) }, action),
+			play: playCached,
+		});
 		if (typeof FuriganaRnpSettings !== 'undefined') FuriganaRnpSettings.install({
 			config: () => config, set: setConfigValue,
-			status: () => { const info = externalClient && externalClient.inspect(); return { text: externalStatusText(),
-				canRetry: config.enabled && config.readingSource === 'external' && !!getCurrentTrackId(), canOpen: !!(info && info.url) }; },
+			status: () => { const info = externalClient && externalClient.inspect(); return { text: compactExternalStatus(),
+				canRetry: config.enabled && config.readingSource === 'external' && !!getCurrentTrackId(), canOpen: !!(info && info.url),
+				editing: !!(editor && editor.isEnabled()), canEdit: !!(getCurrentTrackId() && state.tokenizer) }; },
 			subscribe: fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },
 			retry: retryExternal, openSource: openExternalSource,
+			toggleEditor, openManager: () => editor && editor.openManager(),
 		});
 		window.JPFurigana = {
 			config,
