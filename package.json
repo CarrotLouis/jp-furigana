@@ -1,6 +1,6 @@
 {
   "name": "jp-furigana-plus",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "private": true,
   "description": "BetterNCM Japanese lyric furigana, with optional external providers",
   "scripts": {

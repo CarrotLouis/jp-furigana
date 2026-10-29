@@ -13,7 +13,7 @@ const karaoke = '<div id="rnp-view"><div class="rnp-lyrics">' + texts.map(text =
 const dom = new JSDOM('<body><div id="root">' + (rnp ? '<div class="g-single" style="visibility:hidden">' + native + '</div>' : native) + '</div>' + (rnp ? karaoke : '') + '</body>', { runScripts: 'outside-only', pretendToBeVisual: true, url: 'https://music.163.com/' });
 const win = dom.window, handlers = {}, disk = new Map();
 win.TextEncoder = TextEncoder;
-let songId = '1', pending, requests = 0;
+let songId = '1', pending, requests = 0, failure = '';
 const metadata = { id: 1, name: '星の手紙', artists: [{ name: '試験歌手' }] };
 win.document.getElementById('root').__reactContainer$test = { memoizedProps: { store: { getState: () => ({ playing: { resourceTrackId: songId, curTrack: { ...metadata, id: Number(songId) } } }), dispatch() {}, subscribe() {} } } };
 win.plugin = { pluginPath: src, devMode: false, onLoad: f => handlers.load = f, onConfig: f => handlers.config = f };
@@ -38,6 +38,8 @@ win.FuriganaPlusExternal.browserTransport = () => ({
 	parse: html => new win.DOMParser().parseFromString(html, 'text/html'),
 	request: async url => {
 		requests++;
+		if (failure === 'timeout') throw win.FuriganaPlusExternal.requestError({ curlCode: 28 });
+		if (failure === 'empty') return '';
 		assert.equal(new URL(url).hostname, 'utaten.com', 'UtaTen-only must never request Uta-Net');
 		if (url.includes('/search')) return '<table><tr><td class="searchResult__title"><a href="/lyric/test001/">星の手紙</a></td><td class="searchResult__artist"><p><a>試験歌手</a></p></td></tr></table>';
 		await new Promise(resolve => { pending = resolve; });
@@ -141,5 +143,29 @@ const assertScreenshot = (mode = 'hiragana') => {
 	const local = JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/2.json'));
 	assert.equal(local.provider, 'local'); assert.deepEqual(local.lines, []);
 	assert.equal(local.userEdits[0].reading, 'きみ'); assert.equal(baseText(lyricLines()[0]), original);
+	// Both settings surfaces must expose the actual failure, even with local edits ready.
+	panel.querySelector('[data-a="editMode"]').click();
+	failure = 'timeout'; panel.querySelector('[data-a="externalRetry"]').click();
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().error.includes('curl error 28'));
+	for (const message of [panel.querySelector('.fg-external-status'), rnpMenu.querySelector('[data-status]')]) {
+		assert.match(message.textContent, /UtaTen：搜索页面：请求超时（curl error 28）/);
+		assert(!message.textContent.includes('暂未获取'));
+	}
+	assert.equal(win.JPFuriganaPlus.externalStatus().source, 'local');
+	failure = 'empty'; panel.querySelector('[data-a="externalRetry"]').click();
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().error.includes('空页面'));
+	assert.match(rnpMenu.querySelector('[data-status]').textContent, /空页面（HTTP 200）/);
+	assert(!rnpMenu.querySelector('[data-status]').textContent.includes('未找到同名歌曲'));
+	// Retry countdown and the previous failure stay visible in the compact menu too.
+	win.JPFuriganaPlus.set('externalAutoRetry', 'failed');
+	await until(() => win.JPFuriganaPlus.externalStatus().waitingRetry);
+	assert.match(rnpMenu.querySelector('[data-status]').textContent, /空页面.*\n?.*自动重试（1\/3）/);
+	win.JPFuriganaPlus.set('externalAutoRetry', 'off');
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading);
+	failure = ''; pending = null; panel.querySelector('[data-a="externalRetry"]').click();
+	await until(() => pending); pending();
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().source === 'utaten');
+	assert.equal(win.JPFuriganaPlus.externalStatus().error, '');
+	assert(!rnpMenu.querySelector('[data-status]').textContent.includes('获取失败'));
 	console.log('Integration tests passed (' + (rnp ? 'RNP split karaoke and filler' : 'native DOM') + '): screenshot correction, immediate fallback, async replacement, translations, settings, cached kana toggle, disable restore, track isolation and late-result cancellation.');
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => win.close());

@@ -1,5 +1,7 @@
 // Opt-in Windows smoke test. Fetches only two named songs; keeps copyrighted HTML/cache private.
 // Run: node tools/test-external-live.cjs
+// --diagnose records each provider's availability, including automatic fallback,
+// without aborting at the first website outage. It skips the slower proxy test.
 'use strict';
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict');
 const { spawn } = require('node:child_process'), net = require('node:net');
@@ -9,6 +11,7 @@ const screenshot = require('../tests/fixtures/utaten-confusions.cjs');
 const privateRoot = path.resolve(__dirname, '../tests/private');
 const activeChildren = new Set(), sockets = new Set();
 let count = 0;
+const diagnose = process.argv.includes('--diagnose');
 const bn = {
 	app: {
 		getDataPath: async () => privateRoot,
@@ -33,9 +36,15 @@ const bn = {
 };
 const transport = clientModule.browserTransport(bn, { pluginPath: path.resolve(__dirname, '../src') }, { parse: html => new JSDOM(html).window.document });
 const measuredRequest = async (...args) => {
-	count++; const start = performance.now(); const html = await transport.request(...args);
-	console.log(JSON.stringify({ request: new URL(args[0]).hostname + new URL(args[0]).pathname, milliseconds: Math.round(performance.now() - start), bytes: Buffer.byteLength(html) }));
-	return html;
+	count++; const start = performance.now();
+	try {
+		const html = await transport.request(...args);
+		console.log(JSON.stringify({ request: new URL(args[0]).hostname + new URL(args[0]).pathname, milliseconds: Math.round(performance.now() - start), bytes: Buffer.byteLength(html) }));
+		return html;
+	} catch (error) {
+		console.log(JSON.stringify({ request: new URL(args[0]).hostname + new URL(args[0]).pathname, milliseconds: Math.round(performance.now() - start), error: error.message }));
+		throw error;
+	}
 };
 const tracks = [
 	{ id: '990000001', title: '恋人を射ち堕とした日', artists: ['Sound Horizon'] },
@@ -43,12 +52,14 @@ const tracks = [
 ];
 async function testProviders() {
 	const report = [];
-	for (const provider of ['utaten', 'utanet']) for (const track of tracks) {
+	for (const provider of diagnose ? ['utaten', 'utanet', 'auto'] : ['utaten', 'utanet']) for (const track of tracks) {
 		const client = clientModule.create({ ...transport, request: measuredRequest });
 		const start = performance.now();
 		await client.load(track.id, async () => track, { externalProvider: provider }, true);
 		const status = client.inspect();
-		assert.equal(status.source, provider, status.status);
+		if (diagnose && (!status.ready || status.error)) { report.push({ provider, title: track.title, ok: false, milliseconds: Math.round(performance.now() - start), error: status.error || status.status }); continue; }
+		if (provider === 'auto') assert(['utaten', 'utanet'].includes(status.source), status.status);
+		else assert.equal(status.source, provider, status.status);
 		if (provider === 'utaten' && track.id === tracks[0].id) {
 			const segs = client.segments('凜と蒼く 別離の詩を 戀人を射ち墮とす', 'hiragana');
 			assert(segs && segs.some(s => s.text === '戀人' && s.rt === 'あなた'), 'User-provided traditional text should align to the website ruby');
@@ -63,7 +74,7 @@ async function testProviders() {
 		if (provider === 'utaten' && track.id === tracks[0].id) {
 			assert(client.segments(screenshot.target, 'hiragana').some(s => s.text === '暗' && s.rt === 'やみ'), 'Existing schema-1 caches use the repaired matching too');
 		}
-		report.push({ provider, title: track.title, milliseconds: ms, cacheMilliseconds: Math.round(performance.now() - cacheStart), cacheNetworkRequests: count - before });
+		report.push({ provider, source: status.source, title: track.title, ok: true, milliseconds: ms, cacheMilliseconds: Math.round(performance.now() - cacheStart), cacheNetworkRequests: count - before });
 		if (provider === 'utaten' && track.id === tracks[0].id) {
 			const stored = JSON.parse(await fs.readFile(path.join(privateRoot, 'lyrics/jp-furigana/' + track.id + '.json'), 'utf8'));
 			const relaxed = clientModule.create({ ...transport, request: measuredRequest });
@@ -133,7 +144,7 @@ async function testProxy() {
 	if (process.platform !== 'win32') throw new Error('Windows is required for the actual transport smoke test');
 	await fs.mkdir(privateRoot, { recursive: true });
 	const providers = await testProviders();
-	const proxy = await testProxy();
+	const proxy = diagnose ? { skipped: true } : await testProxy();
 	const report = { providers, proxy, requests: count };
 	await fs.writeFile(path.join(privateRoot, 'live-report.json'), JSON.stringify(report, null, 2));
 	console.log(JSON.stringify(report, null, 2));
