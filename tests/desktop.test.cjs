@@ -56,6 +56,19 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	const yrcOnly=desktop.nativeTimeline({resourceTrackId:'1',lyricLines:[{time:1,lyric:'空をみる'}],yrcInfo:{yrcTrans:'[00:01]看天空',yrcRoma:'[00:01]so ra wo mi ru'}},'1',core.parseLrc)[0];assert.equal(yrcOnly.translation,'看天空');assert.equal(yrcOnly.romaji,'so ra wo mi ru');
 	const fallback=desktop.lrcTimeline('[00:01]空をみる\n[00:04]町へゆく','[00:01.05]看天空\n[00:04]前往小镇',core.parseLrc);
 	assert.equal(fallback[0].time,1,'Convert API milliseconds into native clock seconds');assert.equal(fallback[0].translation,'看天空');
+	const waiting=fixture();waiting.data={...waiting.data,nativeVisible:false};waiting.config.desktopEnabled=true;waiting.host.sync();await tick();
+	assert.equal(waiting.sessions.length,0,'Default-enabled annotations must not open native desktop lyrics or start a renderer');
+	assert.equal(waiting.visibility.length,0);assert.equal(waiting.actions.length,0);assert.equal(waiting.callbacks.get('PlayProgress').size,1);
+	waiting.api.set('desktopEnabled',false);waiting.api.set('desktopEnabled',true);await tick();assert.equal(waiting.sessions.length,0,'Turning annotations on while native lyrics are off only saves the preference');
+	waiting.data={...waiting.data,nativeVisible:true};waiting.nativeNotify();await until(()=>waiting.host.inspect().ready);
+	assert.equal(waiting.sessions.length,1,'Opening native lyrics later immediately activates the already-enabled annotations');
+	waiting.data={...waiting.data,nativeVisible:false};waiting.nativeNotify();await until(()=>waiting.sessions[0].stopped);
+	assert(waiting.config.desktopEnabled,'Closing native lyrics preserves the annotation preference');
+	assert.deepEqual(waiting.visibility.at(-1),{hidden:false,restore:false},'A native close must not restore or reopen the original window');
+	waiting.data={...waiting.data,nativeVisible:true};waiting.nativeNotify();await until(()=>waiting.host.inspect().ready&&waiting.sessions.length===2);
+	waiting.api.set('desktopEnabled',false);await until(()=>waiting.sessions[1].stopped);
+	assert.equal(waiting.data.nativeVisible,true,'Turning annotations off leaves native lyrics enabled');assert.deepEqual(waiting.visibility.at(-1),{hidden:false,restore:true});waiting.host.dispose();
+	const unknown=fixture();unknown.data={...unknown.data,nativeVisible:undefined};unknown.api.set('desktopEnabled',true);await tick();assert.equal(unknown.sessions.length,0,'Unknown native visibility must wait rather than open a renderer');unknown.host.dispose();
 	const f=fixture();f.host.sync();assert.equal(f.sessions.length,0,'Disabled means no renderer or playback listeners');
 	f.api.set('desktopEnabled',true);await until(()=>f.host.inspect().ready);const first=f.sessions[0];
 	assert.equal(first.frames[0].fontSize,35,'Inherit original desktop font size');assert.equal(first.frames[0].style.fontFamily,'微软雅黑');
@@ -85,5 +98,6 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	assert.equal(f.callbacks.get('PlayProgress').size,1);assert(f.callbacks.get('PlayProgress').has(f.existing),'Never remove RNP/client callbacks');f.host.dispose();
 	const bad=fixture({fail:true});bad.api.set('desktopEnabled',true);await until(()=>!bad.config.desktopEnabled);assert.match(bad.host.inspect().status,/组件启动失败/);assert(!bad.visibility.some(v=>v.hidden));bad.host.dispose();
 	const race=fixture({delay:true});race.api.set('desktopEnabled',true);await until(()=>race.sessions.length);race.api.set('desktopEnabled',false);race.release();await until(()=>race.sessions[0].stopped);assert(!race.visibility.some(v=>v.hidden),'Late startup cannot hide the original window');race.host.dispose();
+	const nativeRace=fixture({delay:true});nativeRace.api.set('desktopEnabled',true);await until(()=>nativeRace.sessions.length);nativeRace.data={...nativeRace.data,nativeVisible:false};nativeRace.nativeNotify();nativeRace.release();await until(()=>nativeRace.sessions[0].stopped);assert(nativeRace.config.desktopEnabled);assert.equal(nativeRace.visibility.length,0,'Closing native lyrics during startup cancels without changing native visibility');nativeRace.host.dispose();
 	console.log('Desktop passed: timeline units/offsets, native style inheritance, shared readings, stable-frame caching, seeks, track races, lock/actions, native close/reopen, visibility restore and cancellation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

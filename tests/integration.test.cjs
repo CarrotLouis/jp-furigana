@@ -14,8 +14,9 @@ const dom = new JSDOM('<body><div id="root">' + (rnp ? '<div class="g-single" st
 const win = dom.window, handlers = {}, disk = new Map();
 win.TextEncoder = TextEncoder;
 let songId = '1', pending, requests = 0, failure = '';
+const settingActions = [];
 const metadata = { id: 1, name: '星の手紙', artists: [{ name: '試験歌手' }] };
-win.document.getElementById('root').__reactContainer$test = { memoizedProps: { store: { getState: () => ({ playing: { resourceTrackId: songId, curTrack: { ...metadata, id: Number(songId) } } }), dispatch() {}, subscribe() {} } } };
+win.document.getElementById('root').__reactContainer$test = { memoizedProps: { store: { getState: () => ({ playing: { resourceTrackId: songId, curTrack: { ...metadata, id: Number(songId) } }, setting: { showLyric: false } }), dispatch(action) { settingActions.push(action); }, subscribe() {} } } };
 win.plugin = { pluginPath: src, devMode: false, onLoad: f => handlers.load = f, onConfig: f => handlers.config = f };
 win.betterncm = { app: { getBetterNCMVersion: async () => '1.3.4' }, ncm: { openUrl() {} }, fs: { exists: async () => true } };
 win.kuromojiFuriganaPlus = { builder: () => ({ build: cb => cb(null, { tokenize: text => {
@@ -109,6 +110,11 @@ const assertScreenshot = (mode = 'hiragana') => {
 	assert(panel.querySelector('.fg-desktop-options').hidden); assert(rnpMenu.querySelector('[data-desktop-options]').hidden);
 	desktopEnabled.checked = true; desktopEnabled.dispatchEvent(new win.Event('change'));
 	assert(!panel.querySelector('.fg-desktop-options').hidden); assert(!rnpMenu.querySelector('[data-desktop-options]').hidden);
+	const rnpDesktopEnabled = rnpMenu.querySelector('[data-key="desktopEnabled"]');
+	rnpDesktopEnabled.checked = false; rnpDesktopEnabled.dispatchEvent(new win.Event('change'));
+	rnpDesktopEnabled.checked = true; rnpDesktopEnabled.dispatchEvent(new win.Event('change'));
+	win.JPFuriganaPlus.set('desktopEnabled', false); win.JPFuriganaPlus.set('desktopEnabled', true);
+	assert.equal(settingActions.length, 0, 'Both settings pages and the API must leave the native desktop-lyrics switch untouched');
 	rnpMenu.querySelector('[data-action="assign"]').click();
 	sourceDialog = win.document.querySelector('.fg-source-dialog'); assert(sourceDialog);
 	assert.equal(sourceDialog.querySelector('[data-url]').value, 'https://utaten.com/lyric/test001/');
