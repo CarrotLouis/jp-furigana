@@ -7,10 +7,10 @@ const markup = '<div class="rnp-settings-menu"><div class="rnp-settings-menu-tab
 	'</div><div class="rnp-settings-menu-inner">' + ['appearance', 'lyric', 'font'].map(tab => '<div class="rnp-group" data-tab="' + tab + '"></div>').join('') + '</div></div>';
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true });
 const doc = dom.window.document, listeners = new Set();
-const config = { enabled: true, readingSource: 'external', externalProvider: 'auto', externalAutoRetry: 'failed', rtSize: 60, rtOpacity: 80, karaoke: true, onlyFirstLine: true, skipCredits: true, skipNoKanaLines: true };
-let retries = 0, opens = 0;
+const config = { enabled: true, readingSource: 'external', externalProvider: 'auto', externalAutoRetry: 'failed', rtSize: 60, rtOpacity: 80, karaoke: true, onlyFirstLine: true, skipCredits: true, skipNoKanaLines: true, desktopEnabled:false, desktopInheritStyle:true, desktopTopmost:true, desktopTranslation:true, desktopFontSize:36 };
+let retries = 0, opens = 0; const desktopActions = [];
 const api = { config: () => config, status: () => ({ text: '测试状态', canRetry: config.enabled, canOpen: true }), subscribe: f => { listeners.add(f); return () => listeners.delete(f); },
-	set: (key, value) => { config[key] = value; for (const f of listeners) f(); }, retry: () => retries++, openSource: () => opens++ };
+	set: (key, value) => { config[key] = value; for (const f of listeners) f(); }, retry: () => retries++, openSource: () => opens++, desktopAction: type => desktopActions.push(type) };
 const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeout(resolve, 30));
 (async () => {
 	assert.equal(listeners.size, 0, 'RNP is optional');
@@ -20,8 +20,10 @@ const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeou
 	assert.deepEqual([...menu.querySelector('.rnp-settings-menu-tabs').children].map(n => n.dataset.tab), ['appearance', 'lyric', 'jp-furigana-plus', 'font']);
 	assert.deepEqual([...inner.children].map(n => n.dataset.tab), ['appearance', 'lyric', 'jp-furigana-plus', 'font']);
 	const group = inner.querySelector('[data-tab="jp-furigana-plus"]');
-	assert.equal(group.querySelectorAll('[data-key]').length, 7); // switch, two sliders, four compatibility options
+	assert.equal(group.querySelectorAll('[data-key]').length, 12); // Includes optional desktop controls and native style inheritance.
 	assert.equal(group.querySelectorAll('[data-choice]').length, 3);
+	assert(group.querySelector('[data-desktop-custom]').hidden);
+	group.querySelector('[data-action="desktopSettings"]').click(); group.querySelector('[data-action="desktopUnlock"]').click(); assert.deepEqual(desktopActions,['setting','unlock']);
 	const enabled = group.querySelector('[data-key="enabled"]'); enabled.checked = false; enabled.dispatchEvent(new dom.window.Event('change'));
 	assert.equal(config.enabled, false); assert(group.querySelector('[data-action="retry"]').disabled);
 	api.set('enabled', true); assert(enabled.checked);

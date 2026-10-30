@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana-plus]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFuriganaPlus.build）
-	const BUILD = 'standalone-1.5.3';
+	const BUILD = 'desktop-experiment-1.6.0';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana-plus.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -32,6 +32,12 @@
 		externalCacheDir: '', // default: <BetterNCM data>/lyrics/jp-furigana
 		rtSize: 60, // rt 相对底字的百分比
 		rtOpacity: 80, // rt 不透明度百分比
+		desktopEnabled: false,
+		desktopInheritStyle: true,
+		desktopTopmost: true,
+		desktopTranslation: true,
+		desktopFontSize: 36,
+		desktopBounds: null,
 		karaoke: true, // 逐字歌词：把注音按字符偏移分发到内部的 span，保留逐字动画
 		onlyFirstLine: true, // 一行里只给原文注音，跳过翻译/罗马音
 		skipCredits: true, // 跳过「作词:／编曲:」这类制作信息行
@@ -399,14 +405,18 @@
 		const json = await res.json();
 		const lrc = json.lrc && json.lrc.lyric;
 		const roma = json.romalrc && json.romalrc.lyric;
-		if (lrc && getCurrentTrackId() === trackId) state.evidence = { songId: trackId, lines: lrc.split(/\r?\n/).map(l => l.replace(/\[[^\]]*\]/g, '').trim()).filter(Boolean) };
+		if (lrc && getCurrentTrackId() === trackId) {
+			state.evidence = { songId: trackId, lines: lrc.split(/\r?\n/).map(l => l.replace(/\[[^\]]*\]/g, '').trim()).filter(Boolean) };
+			if (typeof FuriganaPlusDesktop !== 'undefined') state.desktopLyrics = { songId:trackId,
+				lines:FuriganaPlusDesktop.lrcTimeline(lrc, json.tlyric && json.tlyric.lyric, FuriganaPlusCore.parseLrc) };
+		}
 		if (!lrc || !roma) return new Map(); // 这首没有官方音译
 		return FuriganaPlusCore.buildRomajiMap(lrc, roma);
 	}
 
 	/** 换歌了就异步拉一次音译；查表是按歌词文本，所以就算 id 拿错了也只是查不到 */
 	function ensureApiRomaji() {
-		if (config.readingSource !== 'romaji' && config.readingSource !== 'external') return;
+		if (config.readingSource !== 'romaji' && config.readingSource !== 'external' && !config.desktopEnabled) return;
 		const id = getCurrentTrackId();
 		if (!id || id === state.apiTrackId) return;
 
@@ -433,7 +443,7 @@
 	}
 
 	// ------------------------------------------------------ 外部网站（按需联网）
-	let externalClient = null;
+	let externalClient = null, desktop = null;
 	let editor = null, playPending = false;
 	function getExternalClient() {
 		if (!externalClient && typeof FuriganaPlusExternal !== 'undefined') {
@@ -919,6 +929,23 @@
 		return hostsText(line) === line.__fgText;
 	}
 
+	// Both views resolve readings here so website data and user corrections cannot
+	// diverge between the playing page and the desktop window.
+	function resolveReadings(text) {
+		if (!state.tokenizer || shouldSkipLine(text) || !FuriganaPlusCore.hasKanji(text)) return { segments:[{text}], source:null };
+		let segments = null, source = 'dict';
+		if (config.readingSource === 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) {
+			segments = externalClient.segments(text, config.kana, getSegmentsFromRomaji);
+			if (segments) source = 'external';
+		}
+		if (!segments && (config.readingSource === 'romaji' || config.readingSource === 'external') && state.apiRomaji) {
+			const romaji = state.apiRomaji.get(FuriganaPlusCore.lyricKey(text));
+			if (romaji) { segments = getSegmentsFromRomaji(text, romaji); if (segments) source = 'romaji'; }
+		}
+		if (!segments) segments = getSegments(text);
+		if (source !== 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) segments = externalClient.fallbackSegments(text, segments, config.kana);
+		return {segments, source};
+	}
 	function processLine(line) {
 		// 先把之前改过的地方全部还原，让 React 的最新内容显形
 		restoreLine(line);
@@ -942,21 +969,7 @@
 
 		// 外部模式先用核对过原文的网站读音；尚未匹配的行才回退到官方音译 / 词典。
 		// 官方音译也可能有误；只认接口来源，和歌词页上「音」的开关无关。
-		let segments = null;
-		let source = 'dict';
-		if (config.readingSource === 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) {
-			segments = externalClient.segments(text, config.kana, getSegmentsFromRomaji);
-			if (segments) source = 'external';
-		}
-		if (!segments && (config.readingSource === 'romaji' || config.readingSource === 'external') && state.apiRomaji) {
-			const romaji = state.apiRomaji.get(FuriganaPlusCore.lyricKey(text));
-			if (romaji) {
-				segments = getSegmentsFromRomaji(text, romaji);
-				if (segments) source = 'romaji';
-			}
-		}
-		if (!segments) segments = getSegments(text);
-		if (source !== 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) segments = externalClient.fallbackSegments(text, segments, config.kana);
+		const { segments, source } = resolveReadings(text);
 
 		if (!segments.some((s) => s.rt || editor && editor.isEnabled() && s.edit)) {
 			line.__fgText = text;
@@ -1740,15 +1753,17 @@
 	function setConfigValue(key, value) {
 		if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) throw new Error('未知设置项');
 		if (key === 'externalProxy') value = FuriganaPlusExternal.validateProxy(value);
-		if (key === 'rtSize' || key === 'rtOpacity') {
+		if (key === 'rtSize' || key === 'rtOpacity' || key === 'desktopFontSize') {
 			value = Number(value); if (!Number.isFinite(value)) throw new Error('请输入有效数值');
-			value = Math.max(20, Math.min(100, Math.round(value)));
+			value = Math.max(20, Math.min(key === 'desktopFontSize' ? 96 : 100, Math.round(value)));
 		}
+		if (key === 'desktopBounds') { value = FuriganaPlusDesktop.bounds(value); if (!value) throw new Error('无效的桌面歌词位置'); }
 		const choices = { readingSource: ['romaji', 'dict', 'external'], externalProvider: ['auto', 'utaten', 'utanet'], externalAutoRetry: ['off', 'failed'], kana: ['hiragana', 'katakana'] };
 		if (choices[key] && !choices[key].includes(value)) throw new Error('无效的设置选项');
 		if (typeof DEFAULTS[key] === 'boolean') value = !!value;
 		config[key] = value; saveConfig(); updateStyles();
 		if (key === 'enabled') value ? enable() : disable();
+		else if (key === 'desktopEnabled' && value) { getCurrentTrackId(); if (state.store) state.store.dispatch({type:'setting/updateSetting',payload:{showLyric:true}}); }
 		else if (key === 'externalAutoRetry') { if (externalClient) externalClient.setAutoRetry(value); }
 		else if (NEEDS_RESCAN.includes(key)) rescan();
 		notifyConfigUI();
@@ -1817,6 +1832,73 @@
 		// or an older website cache remain usable during this request.
 		if (info.loading || info.error || !info.ready) return (track ? track + '\n' : '') + info.status;
 		return track + (info.warning ? '\n' + info.warning : '');
+	}
+	let desktopNative = null, desktopNativeId = null, desktopNativeLines = [];
+	function desktopSnapshot(options = {}) {
+		const songId = getCurrentTrackId();
+		if (songId) ensureApiRomaji();
+		const root = state.store && state.store.getState(), playing = root && root.playing || {};
+		const lyric = root && root['async:lyric'];
+		if (lyric !== desktopNative || songId !== desktopNativeId) {
+			desktopNative = lyric; desktopNativeId = songId;
+			desktopNativeLines = FuriganaPlusDesktop.nativeTimeline(lyric, songId);
+		}
+		const lines = desktopNativeLines.length ? desktopNativeLines : state.desktopLyrics && state.desktopLyrics.songId === songId ? state.desktopLyrics.lines : [];
+		if (config.enabled && lines.some(l => FuriganaPlusCore.hasKana(l.text))) ensureExternal();
+		const current = options.needCurrentText && document.querySelector('.rnp-lyrics-line[offset="0"] .rnp-lyrics-line-original,.rnp-lyrics-line[offset="0"] .rnp-lyrics-line-karaoke');
+		return { songId, playId:String(playing.playId || ''), lines,
+			title:playing.resourceName || playing.curTrack && playing.curTrack.name || '',
+			currentText:current && isVisible(current) ? plainText(current) : '',
+			nativeVisible:!!(root && root.setting && root.setting.showLyric), playing:playing.playingState === 2,
+			locked:!!(root && root.setting && root.setting.desktopLyricLockState),style:FuriganaPlusDesktop.nativeStyle(root && root.setting || {}) };
+	}
+	let desktopVisibilityVersion = 0, desktopWorkArea = null;
+	function desktopNativeCall(name, args) {
+		return new Promise((resolve,reject) => {
+			const timer = setTimeout(() => reject(new Error('原桌面歌词接口响应超时')),3000);
+			try { channel.call(name,result => {clearTimeout(timer);resolve(result);},args); }
+			catch(e) {clearTimeout(timer);reject(e);}
+		});
+	}
+	async function desktopVisibility(hidden,restore = true) {
+		const version = ++desktopVisibilityVersion;
+		if (!desktopWorkArea) { const info = await desktopNativeCall('os.getSystemInfo',['monitor']); desktopWorkArea = info && info.workArea; }
+		if (version !== desktopVisibilityVersion) return;
+		const root = state.store && state.store.getState();
+		const show = !hidden && restore && !!(root && root.setting && root.setting.showLyric);
+		await desktopNativeCall('winhelper.setNativeWindowShow',['desktop_lyrics',show,desktopWorkArea || {}]);
+	}
+	function desktopAction(type,value) {
+		if (!state.store) return;
+		const setting = state.store.getState().setting || {};
+		if (type === 'setting') FuriganaPlusDesktop.openSettings(state.store);
+		else if (type === 'translation') {
+			if (!config.desktopInheritStyle) setConfigValue('desktopTranslation',!config.desktopTranslation);
+			else state.store.dispatch({type:'setting/changeLyricMode',payload:{type:'translate',checked:setting.lyricMode!=='translate'}});
+		} else if (type === 'fontSize') {
+			const size = Math.max(20,Math.min(96,Math.round(Number(value)||36)));
+			if (!config.desktopInheritStyle) setConfigValue('desktopFontSize',size);
+			else state.store.dispatch({type:'setting/updateSetting',payload:{lyricFontSize:size}});
+		} else if (['offset_back','offset_forward','playprev','play_pause','playnext','setting','lock','unlock','close'].includes(type)) {
+			state.store.dispatch({type:'setting/handleDesktopLyricAction',payload:{type}});
+		}
+	}
+	function watchDesktop(callback) {
+		let unsubscribe = null, timer = null, stopped = false;
+		function attach() {
+			if (stopped) return;
+			getCurrentTrackId();
+			if (!state.store) {timer=setTimeout(attach,1000);return;}
+			let previous = state.store.getState();
+			unsubscribe = state.store.subscribe(() => {
+				const next = state.store.getState(), p = previous.playing || {}, q = next.playing || {};
+				const changed = next.setting !== previous.setting;
+				const refresh = changed || next['async:lyric'] !== previous['async:lyric'] || p.playId !== q.playId || p.playingState !== q.playingState;
+				previous = next;
+				if (refresh) callback(changed);
+			});
+		}
+		attach();return () => {stopped=true;clearTimeout(timer);if(unsubscribe)unsubscribe();};
 	}
 
 	function buildConfigUI() {
@@ -1901,6 +1983,17 @@
 				<span data-v="rtOpacity"></span>
 			</div>
 
+			<h3>桌面歌词（实验）</h3>
+			<div class="fg-row"><label><input type="checkbox" data-k="desktopEnabled"> 启用注音桌面歌词</label></div>
+			<div class="fg-row"><label><input type="checkbox" data-k="desktopInheritStyle"> 沿用原桌面歌词的字体、颜色、字号与布局</label></div>
+			<div class="fg-desktop-custom">
+			<div class="fg-row"><label><input type="checkbox" data-k="desktopTopmost"> 桌面歌词置顶</label><label><input type="checkbox" data-k="desktopTranslation"> 显示中文翻译</label></div>
+			<div class="fg-row"><label>桌面歌词字号</label><input type="range" data-k="desktopFontSize" min="20" max="96" step="1"><span data-v="desktopFontSize"></span></div>
+			</div>
+			<div class="fg-row"><button data-a="desktopSettings">原桌面歌词设置</button><button data-a="desktopUnlock">解锁桌面歌词</button></div>
+			<div class="fg-desktop-status" role="status"></div>
+			<div class="fg-hint">原桌面歌词开关控制显示和关闭；开启注音后自动替换，停用时恢复。拖动歌词移动，Ctrl + 滚轮调整字号；锁定后鼠标穿透，可在此解锁。</div>
+
 			<h3>兼容</h3>
 			<div class="fg-row"><label><input type="checkbox" data-k="karaoke"> 逐字歌词模式（把注音分发到每个字/词，保留逐字高亮动画）</label></div>
 			<div class="fg-row"><label><input type="checkbox" data-k="onlyFirstLine"> 只给原文注音，跳过翻译和罗马音</label></div>
@@ -1926,6 +2019,10 @@
 		}
 
 		function refreshStatus() {
+			const desktopStatus = root.querySelector('.fg-desktop-status');
+			desktopStatus.textContent = desktop ? desktop.inspect().status : '';
+			root.querySelector('.fg-desktop-custom').hidden = config.desktopInheritStyle;
+			for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) root.querySelector('[data-k="'+key+'"]').disabled = config.desktopInheritStyle;
 			const section = root.querySelector('.fg-external-settings');
 			section.hidden = config.readingSource !== 'external';
 			const info = externalClient && externalClient.inspect();
@@ -1948,7 +2045,7 @@
 		}
 
 		// 滑块旁边那行数值怎么显示
-		const fmt = (key) => config[key] + '%';
+		const fmt = (key) => config[key] + (key === 'desktopFontSize' ? 'px' : '%');
 
 		root.querySelectorAll('[data-k]').forEach((el) => {
 			const key = el.dataset.k;
@@ -1993,6 +2090,8 @@
 		};
 		onClick('externalRetry', retryExternal);
 		onClick('externalSource', openExternalSource);
+		onClick('desktopSettings', () => desktopAction('setting'));
+		onClick('desktopUnlock', () => desktopAction('unlock'));
 		onClick('editMode', () => toggleEditor().catch(e => { root.querySelector('.fg-external-error').textContent = e.message; }));
 		onClick('cacheManager', () => editor && editor.openManager());
 		onClick('rescan', () => {
@@ -2093,13 +2192,23 @@
 			manage: (row, action) => getExternalClient().manage(row.songId, { ...config, externalCacheDir: row.path.slice(0, row.path.lastIndexOf('/')) }, action),
 			play: playCached,
 		});
+		if (typeof FuriganaPlusDesktop !== 'undefined') desktop = FuriganaPlusDesktop.host({
+			config:() => config, set:setConfigValue, snapshot:desktopSnapshot,
+			transport:FuriganaPlusDesktop.browserTransport(betterncm,plugin),
+			readings:text => resolveReadings(text).segments,
+			visibility:desktopVisibility, action:desktopAction, watch:watchDesktop,
+			bounds:value => {if (JSON.stringify(config.desktopBounds)!==JSON.stringify(value)) {config.desktopBounds=value;saveConfig();}},
+			subscribe:fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },
+			changed:notifyConfigUI,
+		});
 		if (typeof FuriganaPlusRnpSettings !== 'undefined') FuriganaPlusRnpSettings.install({
 			config: () => config, set: setConfigValue,
 			status: () => { const info = externalClient && externalClient.inspect(); return { text: compactExternalStatus(),
 				canRetry: config.enabled && config.readingSource === 'external' && !!getCurrentTrackId(), canOpen: !!(info && info.url),
-				editing: !!(editor && editor.isEnabled()), canEdit: !!(getCurrentTrackId() && state.tokenizer) }; },
+				editing: !!(editor && editor.isEnabled()), canEdit: !!(getCurrentTrackId() && state.tokenizer), desktop:desktop ? desktop.inspect().status : '' }; },
 			subscribe: fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },
 			retry: retryExternal, openSource: openExternalSource,
+			desktopAction,
 			toggleEditor, openManager: () => editor && editor.openManager(),
 		});
 		window.JPFuriganaPlus = {
@@ -2118,6 +2227,8 @@
 			clearCache,
 			pass: () => schedule(0),
 			segments: (text) => (state.tokenizer ? getSegments(text) : null),
+			readings: text => resolveReadings(text).segments,
+			desktop: () => desktop && desktop.inspect(),
 			trackId: getCurrentTrackId,
 			romajiMap: () => state.apiRomaji,
 			externalStatus: () => externalClient && externalClient.inspect(),
@@ -2127,6 +2238,7 @@
 				schedule(0);
 			},
 		};
+		if (desktop) desktop.sync();
 		console.log(
 			LOG,
 			`已加载 ${BUILD}${DEV ? '（开发模式）' : ''}，` +

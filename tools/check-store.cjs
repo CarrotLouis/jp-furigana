@@ -4,10 +4,14 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const root = path.resolve(__dirname, '..'), src = path.join(root, 'src');
 const m = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+assert.equal(lock.version,pkg.version,'Lockfile version must match package.json');assert.equal(lock.packages[''].version,pkg.version,'Lockfile root metadata must match package.json');
 for (const key of ['name','slug','version','author','author_link','description','preview','betterncm_version']) assert(m[key], 'Missing ' + key);
 assert.equal(m.slug, 'jp-furigana-plus'); assert.equal(m.fork_of, 'jp-furigana'); assert.equal(m.version, pkg.version);
 assert.deepEqual(m.requirements, ['RefinedNowPlayingNext']); assert.equal(m['ncm-version-req'], '> 3.1.11');
-assert.equal(m.require_restart, true); assert(!m.native_plugin, 'No bundled native executable');
+assert.equal(m.require_restart, true); assert(!m.native_plugin, 'No in-process native DLL');
+assert(fs.existsSync(path.join(root,'native/DesktopLyricsHost.cs')), 'Desktop helper source must accompany its binary');
+assert.equal(fs.readFileSync(path.join(src,'desktop-host.exe')).subarray(0,2).toString(),'MZ','Desktop renderer must be a Windows executable');
 assert(/^[a-zA-Z0-9_-]+$/.test(m.slug)); assert(/^\d+\.\d+\.\d+$/.test(m.version));
 assert(!['force-install','force-update','force-uninstall'].some(k => m[k]), 'No forced market actions');
 const image = fs.statSync(path.join(src, m.preview)); assert(image.size <= 200 * 1024, 'Preview must stay small');

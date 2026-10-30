@@ -31,7 +31,7 @@ win.fetch = async () => ({ ok: true, json: async () => ({
 	lrc: { lyric: texts.map((text, i) => '[00:0' + (i + 1) + ']' + text).join('\n') },
 	romalrc: { lyric: '[00:01]ko i bi to to so ra wo mi ru\n[00:02]a ra ga e nu o ki do u no a n ga ka re wo tsu tsu n da\n[00:03]so ra wo mi ru hi' }
 }) });
-for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'rnp-settings.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
+for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'rnp-settings.js', 'desktop.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
 win.FuriganaPlusExternal.browserTransport = () => ({
 	dataRoot: async () => 'C:/BetterNCM',
 	fs: { mkdir: async () => true, exists: async p => disk.has(p), readFileText: async p => disk.get(p), writeFileText: async (p, value) => { disk.set(p, value); return true; } },
@@ -67,6 +67,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	assert(readings(1).includes('あん'), 'Reproduce the old fallback reading before the website is ready');
 	pending();
 	await until(() => readings().includes('あなた'));
+	assert(win.JPFuriganaPlus.readings(original).some(s => s.text === '恋人' && s.rt === 'あなた'), 'Desktop resolver must use the same website readings as the playing page');
 	assert.equal(win.JPFuriganaPlus.state.srcExternal, 2);
 	assert.equal(win.JPFuriganaPlus.state.srcRomaji, 1, 'An actually unmatched line still falls back');
 	assertScreenshot();
@@ -110,6 +111,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 	await until(() => lyricLines()[0].querySelector('.fg-edit-custom')?.textContent === 'きみ');
 	assert.equal(lyricLines()[0].querySelector('.fg-edit-original').textContent, 'あなた');
+	assert(win.JPFuriganaPlus.readings(original).some(s => s.text === '恋人' && s.rt === 'きみ'), 'Desktop shares saved user corrections');
 	assert.equal(baseText(lyricLines()[0]), original);
 	if (rnp) assert(lyricLines()[0].querySelector('.rnp-karaoke-word-filler .fg-edit-custom'));
 	assert.equal(JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).userEdits[0].reading, 'きみ');

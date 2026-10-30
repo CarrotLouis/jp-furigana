@@ -35,6 +35,8 @@ const SRC_FILES = [
 	'external.js',
 	'editor.js',
 	'rnp-settings.js',
+	'desktop.js',
+	'desktop-host.exe',
 	'external-fetch.ps1',
 	'cache-write.ps1',
 	'kuromoji.js',

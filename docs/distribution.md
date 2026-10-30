@@ -25,7 +25,9 @@ Plus 与原版功能重叠，应只启用一个版本。先在 BetterNCM 中移�
 
 ## 分发内容与复现
 
-商店应登记 `/src`；该目录只含运行脚本、PowerShell 源文件、预览图、离线词典及所需许可证。`node tools/pack.js` 的本地包与 `/src` 文件清单一致，不依赖构建时下载歌词或私有服务。商店在打包时会把预览图单独移到预览目录，再将其余内容打成 `.plugin`；因此商店包与本地包的预览图封装方式有所不同，运行源码相同。
+商店应登记 `/src`；该目录包含运行脚本、PowerShell 源文件、预览图、离线词典、所需许可证，以及 1.6.0 实验版的可选桌面绘制组件 `desktop-host.exe`。`node tools/pack.js` 的本地包与 `/src` 文件清单一致，不依赖构建时下载歌词或私有服务。商店在打包时会把预览图单独移到预览目录，再将其余内容打成 `.plugin`；因此商店包与本地包的预览图封装方式有所不同，运行源码相同。
+
+桌面组件源码位于 `native/DesktopLyricsHost.cs`，使用本工程 MIT 许可；Windows 上可用 `powershell.exe -NoProfile -File tools/build-desktop-host.ps1 -Check` 重新编译并验证。它不注入本机 DLL，仅在桌面歌词可见时运行独立的 WPF 绘制进程，以回环地址和随机密钥传递当前行和控制事件。当前实验分支尚未合入商店跟踪分支，详见 [桌面注音](desktop-lyrics.md)。
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
@@ -36,7 +38,7 @@ node tools/test-rnp-dom.js lyricbar
 node tools/pack.js
 ```
 
-本地包：`builds/jp-furigana-plus.plugin`。GitHub Actions 对 `standalone` 执行离线回归、商店检查和打包，并提供 `jp-furigana-plus-plugin` artifact。Windows 作业另验证实际文件原子保存。没有自带的原生可执行程序或 DLL，无需下载或安装额外运行库。
+本地包：`builds/jp-furigana-plus.plugin`。GitHub Actions 执行离线回归、商店检查和打包，并提供 `jp-furigana-plus-plugin` artifact。Windows 作业另验证实际文件原子保存；本实验分支还编译、测试可选的 WPF 绘制组件。该组件依赖系统 .NET Framework 4.8，不包含本机 DLL。
 
 ## 网络、进程与本地数据
 
@@ -60,7 +62,7 @@ node tools/pack.js
 
 ## 兼容性与验收边界
 
-最低声明 BetterNCM 1.3.4；商店版依赖 RefinedNowPlayingNext，已适配 3.0.2，网易云范围跟随该依赖为高于 3.1.11。基础代码保留上游 2.10.x 网页歌词处理，但不将其作为当前商店版支持范围。原生桌面歌词不支持。新旧内核与逐字 filler 的模拟 DOM、实际词典和 Windows 原子保存分别测试，不将模拟结果写作全版本实机验证。完整记录见 [验证记录](validation.md)。
+最低声明 BetterNCM 1.3.4；商店版依赖 RefinedNowPlayingNext，已适配 3.0.2，网易云范围跟随该依赖为高于 3.1.11。基础代码保留上游 2.10.x 网页歌词处理，但不将其作为当前商店版支持范围。本实验分支提供横排透明桌面注音，已在网易云 3.1.42 验证透明显示和进度跟随；尚未合入商店分支。新旧内核与逐字 filler 的模拟 DOM、实际词典和 Windows 原子保存分别测试，不将模拟结果写作全版本实机验证。完整记录见 [验证记录](validation.md)。
 
 ## 从提交到上架
 

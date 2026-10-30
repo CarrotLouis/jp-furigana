@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, standalone]
+    branches: [main, standalone, experiment/desktop-furigana]
   pull_request:
   workflow_dispatch:
 
@@ -103,3 +103,8 @@ jobs:
         with:
           node-version: '20'
       - run: node tests/cache-write.test.cjs
+      - name: Build and verify transparent desktop renderer
+        shell: powershell
+        run: ./tools/build-desktop-host.ps1 -Check
+      - name: Desktop IPC and lifecycle
+        run: node tests/desktop-native.test.cjs
