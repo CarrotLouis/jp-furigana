@@ -2196,6 +2196,7 @@
 			config:() => config, set:setConfigValue, snapshot:desktopSnapshot,
 			transport:FuriganaPlusDesktop.browserTransport(betterncm,plugin),
 			readings:text => resolveReadings(text).segments,
+			skip:shouldSkipLine,
 			visibility:desktopVisibility, action:desktopAction, watch:watchDesktop,
 			bounds:value => {if (JSON.stringify(config.desktopBounds)!==JSON.stringify(value)) {config.desktopBounds=value;saveConfig();}},
 			subscribe:fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },

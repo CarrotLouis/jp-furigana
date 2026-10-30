@@ -5,7 +5,7 @@ const tick=()=>new Promise(r=>setTimeout(r,10));
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await tick();}throw Error('Desktop wait timed out');}
 function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	const subscribers=new Set(),native=new Set(),callbacks=new Map(),sessions=[],visibility=[],actions=[];
-	const config={desktopEnabled:false,desktopInheritStyle:true,desktopFontSize:36,desktopTopmost:true,desktopTranslation:true,enabled:true,rtSize:60,rtOpacity:80,karaoke:true};
+	const config={desktopEnabled:false,desktopInheritStyle:true,desktopFontSize:36,desktopTopmost:true,desktopTranslation:true,enabled:true,rtSize:60,rtOpacity:80,karaoke:true,skipCredits:true,skipNoKanaLines:true};
 	let data={songId:'1',playId:'1|play',nativeVisible:true,playing:true,locked:false,title:'試験曲',currentText:'空をみる',
 		style:desktop.nativeStyle({lyricFont:'微软雅黑',lyricFontSize:35,lyricMode:'translate',lyricColor:['eeeeee','eeeeee','ffdede','ffb0b0'],lyricOutLine:['999999','cb7474'],lyricFontOutlineEnabled:true,lyricLineMode:1}),
 		lines:[{time:1,text:'空をみる',translation:'看天空'},{time:4,text:'町へゆく',translation:'前往小镇'}]},reading='そら',resolutions=0,release;
@@ -19,6 +19,7 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 		snapshot:()=>data,subscribe:fn=>{subscribers.add(fn);return()=>subscribers.delete(fn);},watch:fn=>{native.add(fn);return()=>native.delete(fn);},
 		visibility:async(hidden,restore=true)=>visibility.push({hidden,restore}),bounds:value=>config.desktopBounds=value,
 		readings:text=>{resolutions++;return[{text:text[0],rt:reading},{text:text.slice(1)}];},
+		skip:text=>config.skipCredits&&core.isCreditLine(text)||config.skipNoKanaLines&&!core.hasKana(text),
 		action:(type,value)=>{actions.push({type,value});if(type==='close'){data={...data,nativeVisible:false};nativeNotify();}},
 		transport:{start:async()=>{
 			if(fail)throw Error('模拟组件启动失败');
@@ -73,6 +74,8 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	await first.emit({type:'unlock'});await until(()=>f.actions.some(a=>a.type==='unlock'));
 	await first.emit({type:'bounds',value:{x:12,y:34,width:700}});await until(()=>f.config.desktopBounds);assert.equal(f.config.desktopBounds.width,700);
 	f.api.set('desktopInheritStyle',false);f.api.set('desktopFontSize',54);f.api.set('desktopTranslation',false);await until(()=>first.frames.at(-1).fontSize===54);assert.equal(first.frames.at(-1).translation,'');
+	f.data={...f.data,lines:[{time:1,text:'作詞: 空ゆい子',translation:''}]};f.nativeNotify();clock('1|play',1.1);await until(()=>first.frames.at(-1).segments.map(s=>s.text).join('')==='作詞: 空ゆい子');assert(!first.frames.at(-1).segments.some(s=>s.rt),'Credit skipping must also guard raw dictionary adapters');
+	f.api.set('skipCredits',false);await until(()=>first.frames.at(-1).segments.some(s=>s.rt));f.api.set('skipCredits',true);await until(()=>!first.frames.at(-1).segments.some(s=>s.rt));
 	f.data={...f.data,songId:'2',playId:'2|play',currentText:'',lines:[]};f.nativeNotify();clock('1|play',90);await until(()=>first.frames.at(-1).message==='暂无歌词');assert.equal(first.frames.at(-1).segments.length,0,'Track changes clear stale text');
 	await first.emit({type:'close'});await until(()=>first.stopped);assert(f.config.desktopEnabled,'Closing native lyrics keeps replacement mode for the next native hotkey/open action');assert(f.visibility.some(v=>!v.hidden&&!v.restore));
 	f.data={...f.data,nativeVisible:true};f.nativeNotify();await until(()=>f.sessions.length===2&&f.host.inspect().ready);

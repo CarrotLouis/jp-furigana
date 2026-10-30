@@ -120,10 +120,10 @@
 			let index=lineAt(data.lines,position);if(position===null&&data.currentText)index=data.lines.findIndex(l=>l.text.trim()===data.currentText.trim());
 			const row=index>=0?data.lines[index]:null,next=style.doubleLine&&index+1<data.lines.length?data.lines[index+1]:null;
 			const karaoke=cfg.karaoke!==false&&!!(row&&row.words&&row.words.length),highlight=karaoke?highlightTo(row,position):null;
-			const sig=JSON.stringify([track,playId,revision,row,next,cfg.enabled,cfg.kana,cfg.rtSize,cfg.rtOpacity,cfg.karaoke,highlight,cfg.desktopFontSize,cfg.desktopTranslation,cfg.desktopTopmost,cfg.desktopBounds,style,data.playing,data.locked]);
+			const sig=JSON.stringify([track,playId,revision,row,next,cfg.enabled,cfg.kana,cfg.rtSize,cfg.rtOpacity,cfg.karaoke,cfg.skipCredits,cfg.skipNoKanaLines,highlight,cfg.desktopFontSize,cfg.desktopTranslation,cfg.desktopTopmost,cfg.desktopBounds,style,data.playing,data.locked]);
 			if(!force&&sig===signature)return;signature=sig;
-			const readingKey=JSON.stringify([revision,track,cfg.kana,cfg.readingSource]);if(readingRevision!==readingKey){readingCache.clear();readingRevision=readingKey;}
-			const readings=text=>{if(!cfg.enabled)return[{text}];if(!readingCache.has(text)){if(readingCache.size>=4)readingCache.clear();readingCache.set(text,api.readings(text)||[{text}]);}return readingCache.get(text);};const mode=cfg.desktopInheritStyle===false?cfg.desktopTranslation!==false?'translate':'none':style.mode||'translate',secondary=line=>line?(mode==='roman'?line.romaji:mode==='translate'?line.translation:'')||'':'';
+			const readingKey=JSON.stringify([revision,track,cfg.kana,cfg.readingSource,cfg.skipCredits,cfg.skipNoKanaLines]);if(readingRevision!==readingKey){readingCache.clear();readingRevision=readingKey;}
+			const readings=text=>{if(!cfg.enabled||api.skip&&api.skip(text))return[{text}];if(!readingCache.has(text)){if(readingCache.size>=4)readingCache.clear();readingCache.set(text,api.readings(text)||[{text}]);}return readingCache.get(text);};const mode=cfg.desktopInheritStyle===false?cfg.desktopTranslation!==false?'translate':'none':style.mode||'translate',secondary=line=>line?(mode==='roman'?line.romaji:mode==='translate'?line.translation:'')||'':'';
 			pending={segments:row?readings(row.text):[],translation:secondary(row),fontSize:style.fontSize||cfg.desktopFontSize||36,style,
 				rtSize:cfg.rtSize,rtOpacity:cfg.rtOpacity,karaoke,highlightTo:highlight,topmost:style.topmost===undefined?cfg.desktopTopmost!==false:style.topmost,locked:!!data.locked,playing:!!data.playing,bounds:bounds(cfg.desktopBounds),
 				next:next?{segments:readings(next.text),translation:secondary(next)}:null,

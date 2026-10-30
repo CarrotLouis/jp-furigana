@@ -128,6 +128,12 @@ namespace FuriganaPlusDesktop {
         string kind;public string Kind {get{return kind;}set{if(kind!=value){kind=value;InvalidateVisual();}}}
         public ToolbarGlyph(string value){Kind=value;Width=20;Height=20;}
         protected override void OnRender(DrawingContext dc){
+            if(Kind=="unlock"){
+                dc.PushTransform(new ScaleTransform(ActualWidth/24,ActualHeight/30));
+                var shackle=new Pen(Brushes.White,3.2){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round};dc.DrawGeometry(null,shackle,Geometry.Parse("M5 12V7C5 0 17 0 17 7"));
+                var hole=Geometry.Parse("M12 16C9 16 9 20 10.8 20.7L10.3 24H13.7L13.2 20.7C15 20 15 16 12 16Z");
+                dc.DrawGeometry(Brushes.White,null,new CombinedGeometry(GeometryCombineMode.Exclude,new RectangleGeometry(new Rect(1,12,22,17),2.5,2.5),hole));dc.Pop();return;
+            }
             dc.PushTransform(new ScaleTransform(ActualWidth/24,ActualHeight/24));var pen=new Pen(Brushes.White,1.9){StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round,LineJoin=PenLineJoin.Round};string path=null;
             switch(Kind){
                 case "detail":path="M9 18V6L20 4V16 M9 9L20 7";dc.DrawEllipse(Brushes.White,null,new Point(6,18),3,2.5);dc.DrawEllipse(Brushes.White,null,new Point(17,16),3,2.5);break;
@@ -136,7 +142,7 @@ namespace FuriganaPlusDesktop {
                 case "play_pause":dc.DrawGeometry(Brushes.White,null,Geometry.Parse("M7 3L20 12 7 21Z"));break;
                 case "pause":dc.DrawRectangle(Brushes.White,null,new Rect(6,4,4,16));dc.DrawRectangle(Brushes.White,null,new Rect(14,4,4,16));break;
                 case "setting":path="M10 2H14L15 5 17 6 20 5 22 9 20 11V13L22 15 20 19 17 18 15 19 14 22H10L9 19 7 18 4 19 2 15 4 13V11L2 9 4 5 7 6 9 5Z";dc.DrawEllipse(null,pen,new Point(12,12),3.5,3.5);break;
-                case "lock":case "unlock":dc.DrawRoundedRectangle(null,pen,new Rect(5,10,14,11),1,1);path="M8 10V7A4 4 0 0 1 16 7V10 M12 14V17";break;
+                case "lock":dc.DrawRoundedRectangle(null,pen,new Rect(5,10,14,11),1,1);path="M8 10V7A4 4 0 0 1 16 7V10 M12 14V17";break;
                 case "close":path="M5 5L19 19 M19 5L5 19";break;
                 case "offset_back":case "offset_forward":var text=new FormattedText(Kind=="offset_back"?"+0.5s":"-0.5s",CultureInfo.InvariantCulture,FlowDirection.LeftToRight,new Typeface(new FontFamily("Arial"),FontStyles.Normal,FontWeights.Bold,FontStretches.Condensed),14,Brushes.White,VisualTreeHelper.GetDpi(this).PixelsPerDip);dc.DrawText(text,new Point((24-text.Width)/2,2));break;
             }
@@ -153,7 +159,7 @@ namespace FuriganaPlusDesktop {
         public readonly LyricCanvas Canvas=new LyricCanvas();
         readonly WrapPanel tools=new WrapPanel { Orientation=Orientation.Horizontal, HorizontalAlignment=HorizontalAlignment.Center };
         readonly Action<string,object> action; readonly Button play; readonly DispatcherTimer leaveTimer;
-        readonly Border toolbar,hoverFrame; IntPtr handle; bool locked,closing,rendering,closingRequested;
+        readonly Border toolbar,hoverFrame; IntPtr handle; bool locked,closing,rendering,closingRequested,manipulating;
         readonly Window unlockWindow;readonly Button unlockButton;readonly DispatcherTimer lockHover;
         public bool Locked { get { return locked; } }
         public LyricsWindow(Action<string,object> send) {
@@ -168,38 +174,47 @@ namespace FuriganaPlusDesktop {
             grid.Children.Add(toolbar);Grid.SetRow(Canvas,1);Canvas.Margin=new Thickness(8,0,8,0);grid.Children.Add(Canvas);
             hoverFrame=new Border {BorderThickness=new Thickness(1),BorderBrush=Brushes.Transparent,Background=Brushes.Transparent,CornerRadius=new CornerRadius(4),Child=grid};Content=hoverFrame;
             var area=SystemParameters.WorkArea;Left=area.Left+Math.Max(0,(area.Width-Width)/2);Top=area.Bottom-230;
-            leaveTimer=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(350)};leaveTimer.Tick+=(s,e)=>{leaveTimer.Stop();if(!IsMouseOver)SetHover(false);};
+            leaveTimer=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(350)};leaveTimer.Tick+=(s,e)=>{CursorPoint p;if(!manipulating&&(!GetCursorPos(out p)||!new Rect(0,0,ActualWidth,ActualHeight).Contains(PointFromScreen(new Point(p.X,p.Y))))){leaveTimer.Stop();SetHover(false);}};
             // The lyrics stay click-through; a small separate handle can unlock.
-            unlockButton=IconButton("unlock","解锁桌面歌词");unlockButton.Width=40;unlockButton.Height=40;unlockButton.Background=new SolidColorBrush(Color.FromArgb(170,0,0,0));
-            unlockWindow=new Window {Title="桌面歌词解锁",Width=40,Height=40,WindowStyle=WindowStyle.None,AllowsTransparency=true,Background=Brushes.Transparent,ShowInTaskbar=false,ShowActivated=false,ResizeMode=ResizeMode.NoResize,Content=unlockButton,Template=FramelessTemplate()};
+            unlockButton=IconButton("unlock","解锁桌面歌词",false);unlockButton.Width=34;unlockButton.Height=32;
+            var unlockGlyph=(ToolbarGlyph)unlockButton.Content;unlockGlyph.Width=20;unlockGlyph.Height=26;unlockGlyph.Effect=new System.Windows.Media.Effects.DropShadowEffect {Color=Colors.Black,BlurRadius=2,ShadowDepth=1,Opacity=.4};
+            unlockWindow=new Window {Title="桌面歌词解锁",Width=34,Height=32,WindowStyle=WindowStyle.None,AllowsTransparency=true,Background=Brushes.Transparent,ShowInTaskbar=false,ShowActivated=false,ResizeMode=ResizeMode.NoResize,Content=unlockButton,Template=FramelessTemplate()};
             unlockWindow.SourceInitialized+=(s,e)=>{var h=new WindowInteropHelper(unlockWindow).Handle;SetWindowLong(h,GWL_EXSTYLE,GetWindowLong(h,GWL_EXSTYLE)|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW);};
             unlockButton.Click+=(s,e)=>action("unlock",null);
             lockHover=new DispatcherTimer {Interval=TimeSpan.FromMilliseconds(120)};
             lockHover.Tick+=(s,e)=>{CursorPoint p;if(!locked||!IsVisible||!GetCursorPos(out p)){unlockWindow.Hide();return;}var local=PointFromScreen(new Point(p.X,p.Y));if(new Rect(0,0,ActualWidth,ActualHeight).Contains(local)||unlockWindow.IsMouseOver)ShowUnlockHandle();else unlockWindow.Hide();};
             MouseEnter+=(s,e)=>{if(!locked){leaveTimer.Stop();SetHover(true);}};MouseLeave+=(s,e)=>leaveTimer.Start();
-            Canvas.MouseLeftButtonDown+=(s,e)=>{if(!locked){try{DragMove();SaveBounds();}catch(InvalidOperationException){}}};
+            Canvas.MouseLeftButtonDown+=(s,e)=>{if(!locked){SetManipulating(true);try{DragMove();SaveBounds();}catch(InvalidOperationException){}finally{SetManipulating(false);}}};
             PreviewMouseWheel+=(s,e)=>{if(locked)return;if((Keyboard.Modifiers&ModifierKeys.Control)!=0)action("fontSize",Canvas.FontSize+(e.Delta>0?1:-1));else action(e.Delta>0?"offset_back":"offset_forward",null);e.Handled=true;};
             SourceInitialized+=(s,e)=>{handle=new WindowInteropHelper(this).Handle;SetWindowLong(handle,GWL_EXSTYLE,GetWindowLong(handle,GWL_EXSTYLE)|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW);HwndSource.FromHwnd(handle).AddHook(ResizeHitTest);};
             SizeChanged+=(s,e)=>{if(!rendering)SaveBounds();};Closing+=(s,e)=>{if(!closing){e.Cancel=true;closingRequested=true;Hide();action("close",null);}};
         }
         static ControlTemplate FramelessTemplate(){var template=new ControlTemplate(typeof(Window));var presenter=new FrameworkElementFactory(typeof(ContentPresenter));presenter.SetValue(ContentPresenter.ContentProperty,new TemplateBindingExtension(ContentControl.ContentProperty));template.VisualTree=presenter;return template;}
         IntPtr ResizeHitTest(IntPtr hwnd,int msg,IntPtr wp,IntPtr lp,ref bool handled){
+            if(msg==0x231&&!locked){SetManipulating(true);return IntPtr.Zero;}
+            if(msg==0x232){SetManipulating(false);SaveBounds();return IntPtr.Zero;}
+            if(msg==0xa0&&!locked){SetHover(true);leaveTimer.Start();}
             if(msg!=0x84||locked)return IntPtr.Zero;long packed=lp.ToInt64();var p=PointFromScreen(new Point((short)(packed&0xffff),(short)((packed>>16)&0xffff)));int hit=0;
             if(p.X>=0&&p.Y>=0&&p.X<=ActualWidth&&p.Y<=ActualHeight){bool left=p.X<4,right=p.X>ActualWidth-4,top=p.Y<4,bottom=p.Y>ActualHeight-4;hit=top?(left?13:right?14:12):bottom?(left?16:right?17:15):left?10:right?11:0;}
             if(hit!=0){handled=true;return new IntPtr(hit);}return IntPtr.Zero;
         }
-        static Button IconButton(string kind,string title) {
+        static Button IconButton(string kind,string title,bool hoverFill=true) {
             var b=new Button {Content=new ToolbarGlyph(kind),ToolTip=title,Focusable=false,Width=34,Height=30,Background=Brushes.Transparent,BorderThickness=new Thickness(0),Cursor=Cursors.Hand};
             var template=new ControlTemplate(typeof(Button));var border=new FrameworkElementFactory(typeof(Border));border.SetValue(Border.CornerRadiusProperty,new CornerRadius(3));border.SetValue(Border.BackgroundProperty,new TemplateBindingExtension(Control.BackgroundProperty));var content=new FrameworkElementFactory(typeof(ContentPresenter));content.SetValue(FrameworkElement.HorizontalAlignmentProperty,HorizontalAlignment.Center);content.SetValue(FrameworkElement.VerticalAlignmentProperty,VerticalAlignment.Center);border.AppendChild(content);template.VisualTree=border;
-            var hover=new Trigger {Property=IsMouseOverProperty,Value=true};hover.Setters.Add(new Setter(Control.BackgroundProperty,new SolidColorBrush(Color.FromArgb(45,255,255,255))));template.Triggers.Add(hover);b.Template=template;return b;
+            if(hoverFill){var hover=new Trigger {Property=IsMouseOverProperty,Value=true};hover.Setters.Add(new Setter(Control.BackgroundProperty,new SolidColorBrush(Color.FromArgb(45,255,255,255))));template.Triggers.Add(hover);}b.Template=template;return b;
         }
         Button Add(string kind,string title,Action click) {var b=IconButton(kind,title);b.Click+=(s,e)=>click();tools.Children.Add(b);return b;}
-        void SetHover(bool value){toolbar.Visibility=value&&!locked?Visibility.Visible:Visibility.Hidden;hoverFrame.Background=value&&!locked?new SolidColorBrush(Color.FromArgb(120,0,0,0)):Brushes.Transparent;hoverFrame.BorderBrush=value&&!locked?new SolidColorBrush(Color.FromArgb(70,255,255,255)):Brushes.Transparent;}
+        void SetHover(bool value){value=(value||manipulating)&&!locked;toolbar.Visibility=value?Visibility.Visible:Visibility.Hidden;hoverFrame.Background=value?new SolidColorBrush(Color.FromArgb(120,0,0,0)):Brushes.Transparent;hoverFrame.BorderBrush=value?new SolidColorBrush(Color.FromArgb(70,255,255,255)):Brushes.Transparent;}
+        void SetManipulating(bool value){manipulating=value;if(value)leaveTimer.Stop();SetHover(value||IsMouseOver);if(!value)leaveTimer.Start();}
         void SaveBounds() { if(IsLoaded)action("bounds",new {x=Left,y=Top,width=Width}); }
         public void SetLocked(bool value) { locked=value;if(handle!=IntPtr.Zero){int style=GetWindowLong(handle,GWL_EXSTYLE);SetWindowLong(handle,GWL_EXSTYLE,value?style|WS_EX_TRANSPARENT:style&~WS_EX_TRANSPARENT);}if(value){SetHover(false);ResizeMode=ResizeMode.NoResize;lockHover.Start();}else{ResizeMode=ResizeMode.CanResize;lockHover.Stop();unlockWindow.Hide();SetHover(IsMouseOver);} }
-        void ShowUnlockHandle(){if(unlockWindow.Owner==null&&IsVisible)unlockWindow.Owner=this;unlockWindow.Topmost=Topmost;unlockWindow.Left=Left+(ActualWidth-unlockWindow.Width)/2;unlockWindow.Top=Top+(ActualHeight-unlockWindow.Height)/2;if(!unlockWindow.IsVisible)unlockWindow.Show();}
+        void ShowUnlockHandle(){if(unlockWindow.Owner==null&&IsVisible)unlockWindow.Owner=this;unlockWindow.Topmost=Topmost;unlockWindow.Left=Left+(ActualWidth-unlockWindow.Width)/2;unlockWindow.Top=Top+1;if(!unlockWindow.IsVisible)unlockWindow.Show();}
         public void TestUnlockClick(){ShowUnlockHandle();unlockButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));}
-        public bool UnlockIsCentered {get{return Math.Abs(unlockWindow.Left+unlockWindow.Width/2-Left-ActualWidth/2)<1&&Math.Abs(unlockWindow.Top+unlockWindow.Height/2-Top-ActualHeight/2)<1;}}
+        public bool UnlockIsCentered {get{return Math.Abs(unlockWindow.Left+unlockWindow.Width/2-Left-ActualWidth/2)<1;}}
+        public bool UnlockAboveLyrics {get{return unlockWindow.Top+unlockWindow.Height<=Top+Canvas.TransformToAncestor(this).Transform(new Point()).Y+.1;}}
+        public bool UnlockBackgroundTransparent {get{return ((SolidColorBrush)unlockButton.Background).Color.A==0;}}
+        public bool TestResizeBounds(){SetManipulating(true);SetHover(false);bool visible=((SolidColorBrush)hoverFrame.Background).Color.A>0;SetManipulating(false);return visible;}
+        public void SaveUnlockPreview(string path){unlockWindow.UpdateLayout();var image=new RenderTargetBitmap((int)Math.Ceiling(unlockWindow.ActualWidth),(int)Math.Ceiling(unlockWindow.ActualHeight),96,96,PixelFormats.Pbgra32);image.Render(unlockWindow);var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(image));using(var output=File.Create(path))png.Save(output);}
         public bool TestHoverBounds(){SetHover(true);bool shown=toolbar.Visibility==Visibility.Visible&&((SolidColorBrush)hoverFrame.Background).Color.A>0;SetHover(false);return shown&&((SolidColorBrush)hoverFrame.Background).Color.A==0;}
         public void SaveChromePreview(string path){SetHover(true);UpdateLayout();var image=new RenderTargetBitmap((int)Math.Ceiling(ActualWidth),(int)Math.Ceiling(ActualHeight),96,96,PixelFormats.Pbgra32);image.Render(this);var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(image));using(var output=File.Create(path))png.Save(output);SetHover(false);}
         public int ExtendedStyle {get{return handle==IntPtr.Zero?0:GetWindowLong(handle,GWL_EXSTYLE);}}
@@ -273,7 +288,7 @@ namespace FuriganaPlusDesktop {
             try {
                 var app=new Application();string lastAction="";var window=new LyricsWindow((t,v)=>{lastAction=t;});window.Left=-10000;window.Top=-10000;window.Width=800;window.Show();
                 var frame=Data.Json.DeserializeObject("{\"fontSize\":36,\"rtSize\":60,\"rtOpacity\":80,\"segments\":[{\"text\":\"空\",\"rt\":\"そら\"},{\"text\":\"を\"},{\"text\":\"見\",\"rt\":\"み\"},{\"text\":\"上\",\"rt\":\"あ\"},{\"text\":\"げる\"}],\"translation\":\"仰望天空\",\"style\":{\"fontFamily\":\"Microsoft YaHei\",\"outline\":true}}") as IDictionary<string,object>;
-                window.Apply(frame);window.UpdateLayout();window.SetLocked(true);int locked=window.ExtendedStyle;window.TestUnlockClick();bool unlockAction=lastAction=="unlock",unlockCentered=window.UnlockIsCentered;window.SetLocked(false);int unlocked=window.ExtendedStyle;bool hoverBounds=window.TestHoverBounds();window.SaveChromePreview(Path.Combine(directory,"desktop-native-chrome.png"));
+                window.Apply(frame);window.UpdateLayout();window.SetLocked(true);int locked=window.ExtendedStyle;window.TestUnlockClick();bool unlockAction=lastAction=="unlock",unlockCentered=window.UnlockIsCentered,unlockAboveLyrics=window.UnlockAboveLyrics,unlockTransparent=window.UnlockBackgroundTransparent;window.SaveUnlockPreview(Path.Combine(directory,"desktop-native-unlock.png"));window.SetLocked(false);int unlocked=window.ExtendedStyle;bool hoverBounds=window.TestHoverBounds(),resizeBounds=window.TestResizeBounds();window.SaveChromePreview(Path.Combine(directory,"desktop-native-chrome.png"));
                 // Render a root visual without the live window's layout offset.
                 var canvas=new LyricCanvas();canvas.SetFrame(frame);canvas.Measure(new Size(760,double.PositiveInfinity));canvas.Arrange(new Rect(0,0,760,canvas.DesiredSize.Height));canvas.UpdateLayout();
                 var image=new RenderTargetBitmap(760,(int)Math.Ceiling(canvas.ActualHeight),96,96,PixelFormats.Pbgra32);
@@ -283,8 +298,8 @@ namespace FuriganaPlusDesktop {
                 frame["rtOpacity"]=20;var faint=RenderCanvas(frame);frame["rtOpacity"]=80;var bright=RenderCanvas(frame);bool opacity=TopAlpha(bright)>TopAlpha(faint)+100;
                 frame["rtSize"]=20;var small=RenderCanvas(frame);frame["rtSize"]=100;var large=RenderCanvas(frame);bool readingSize=large.PixelHeight>small.PixelHeight+30;
                 frame["karaoke"]=true;frame["highlightTo"]=0;var unplayed=RenderCanvas(frame);frame["highlightTo"]=5;var played=RenderCanvas(frame);bool karaoke=InkDifference(unplayed,played)>300;
-                bool passed=window.AllowsTransparency&&(locked&0x80000)!=0&&(locked&0x20)!=0&&(unlocked&0x20)==0&&unlockAction&&unlockCentered&&hoverBounds&&opacity&&readingSize&&karaoke&&clear>ink&&ink>300;
-                File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=passed,transparentPixels=clear,inkPixels=ink,layered=(locked&0x80000)!=0,lockedClickThrough=(locked&0x20)!=0,unlockedInteractive=(unlocked&0x20)==0,unlockHandle=unlockAction,unlockCentered,hoverBounds,opacity,readingSize,karaoke,width=image.PixelWidth,height=image.PixelHeight}),new UTF8Encoding(false));
+                bool passed=window.AllowsTransparency&&(locked&0x80000)!=0&&(locked&0x20)!=0&&(unlocked&0x20)==0&&unlockAction&&unlockCentered&&unlockAboveLyrics&&unlockTransparent&&hoverBounds&&resizeBounds&&opacity&&readingSize&&karaoke&&clear>ink&&ink>300;
+                File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=passed,transparentPixels=clear,inkPixels=ink,layered=(locked&0x80000)!=0,lockedClickThrough=(locked&0x20)!=0,unlockedInteractive=(unlocked&0x20)==0,unlockHandle=unlockAction,unlockCentered,unlockAboveLyrics,unlockTransparent,hoverBounds,resizeBounds,opacity,readingSize,karaoke,width=image.PixelWidth,height=image.PixelHeight}),new UTF8Encoding(false));
                 window.Shutdown();app.Shutdown();return passed?0:1;
             }catch(Exception e){File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=false,error=e.ToString()}));return 1;}
         }

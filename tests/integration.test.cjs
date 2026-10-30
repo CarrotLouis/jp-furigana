@@ -68,6 +68,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	pending();
 	await until(() => readings().includes('あなた'));
 	assert(win.JPFuriganaPlus.readings(original).some(s => s.text === '恋人' && s.rt === 'あなた'), 'Desktop resolver must use the same website readings as the playing page');
+	assert(!win.JPFuriganaPlus.readings('作詞: 空ゆい子').some(s=>s.rt),'Desktop resolver inherits credit skipping even when the artist has kana');
 	assert.equal(win.JPFuriganaPlus.state.srcExternal, 2);
 	assert.equal(win.JPFuriganaPlus.state.srcRomaji, 1, 'An actually unmatched line still falls back');
 	assertScreenshot();
