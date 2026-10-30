@@ -82,6 +82,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	// Exercise the real settings -> dialog -> per-song persistence path.
 	const beforeManual = requests;
 	panel.querySelector('[data-a="externalAssign"]').click();
+	await until(() => win.document.querySelector('.fg-source-dialog'));
 	let sourceDialog = win.document.querySelector('.fg-source-dialog'); assert(sourceDialog);
 	sourceDialog.querySelector('[data-url]').value = 'https://utaten.com/search';
 	sourceDialog.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
@@ -116,6 +117,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	win.JPFuriganaPlus.set('desktopEnabled', false); win.JPFuriganaPlus.set('desktopEnabled', true);
 	assert.equal(settingActions.length, 0, 'Both settings pages and the API must leave the native desktop-lyrics switch untouched');
 	rnpMenu.querySelector('[data-action="assign"]').click();
+	await until(() => win.document.querySelector('.fg-source-dialog'));
 	sourceDialog = win.document.querySelector('.fg-source-dialog'); assert(sourceDialog);
 	assert.equal(sourceDialog.querySelector('[data-url]').value, 'https://utaten.com/lyric/test001/');
 	sourceDialog.querySelector('[data-url]').value = ''; pending = null;
