@@ -408,7 +408,7 @@
 		if (lrc && getCurrentTrackId() === trackId) {
 			state.evidence = { songId: trackId, lines: lrc.split(/\r?\n/).map(l => l.replace(/\[[^\]]*\]/g, '').trim()).filter(Boolean) };
 			if (typeof FuriganaPlusDesktop !== 'undefined') state.desktopLyrics = { songId:trackId,
-				lines:FuriganaPlusDesktop.lrcTimeline(lrc, json.tlyric && json.tlyric.lyric, FuriganaPlusCore.parseLrc) };
+				lines:FuriganaPlusDesktop.lrcTimeline(lrc, json.tlyric && json.tlyric.lyric, FuriganaPlusCore.parseLrc, json.yrc && json.yrc.lyric, roma) };
 		}
 		if (!lrc || !roma) return new Map(); // 这首没有官方音译
 		return FuriganaPlusCore.buildRomajiMap(lrc, roma);
@@ -1841,7 +1841,7 @@
 		const lyric = root && root['async:lyric'];
 		if (lyric !== desktopNative || songId !== desktopNativeId) {
 			desktopNative = lyric; desktopNativeId = songId;
-			desktopNativeLines = FuriganaPlusDesktop.nativeTimeline(lyric, songId);
+			desktopNativeLines = FuriganaPlusDesktop.nativeTimeline(lyric, songId, FuriganaPlusCore.parseLrc);
 		}
 		const lines = desktopNativeLines.length ? desktopNativeLines : state.desktopLyrics && state.desktopLyrics.songId === songId ? state.desktopLyrics.lines : [];
 		if (config.enabled && lines.some(l => FuriganaPlusCore.hasKana(l.text))) ensureExternal();
@@ -1878,8 +1878,8 @@
 		} else if (type === 'fontSize') {
 			const size = Math.max(20,Math.min(96,Math.round(Number(value)||36)));
 			if (!config.desktopInheritStyle) setConfigValue('desktopFontSize',size);
-			else state.store.dispatch({type:'setting/updateSetting',payload:{lyricFontSize:size}});
-		} else if (['offset_back','offset_forward','playprev','play_pause','playnext','setting','lock','unlock','close'].includes(type)) {
+			else FuriganaPlusDesktop.setFontSize(state.store,size);
+		} else if (['detail','offset_back','offset_forward','playprev','play_pause','playnext','lock','unlock','close'].includes(type)) {
 			state.store.dispatch({type:'setting/handleDesktopLyricAction',payload:{type}});
 		}
 	}
