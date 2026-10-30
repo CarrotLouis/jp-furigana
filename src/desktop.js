@@ -124,7 +124,7 @@
 			if(!force&&sig===signature)return;signature=sig;
 			const readingKey=JSON.stringify([revision,track,cfg.kana,cfg.readingSource,cfg.skipCredits,cfg.skipNoKanaLines]);if(readingRevision!==readingKey){readingCache.clear();readingRevision=readingKey;}
 			const readings=text=>{if(!cfg.enabled||api.skip&&api.skip(text))return[{text}];if(!readingCache.has(text)){if(readingCache.size>=4)readingCache.clear();readingCache.set(text,api.readings(text)||[{text}]);}return readingCache.get(text);};const mode=cfg.desktopInheritStyle===false?cfg.desktopTranslation!==false?'translate':'none':style.mode||'translate',secondary=line=>line?(mode==='roman'?line.romaji:mode==='translate'?line.translation:'')||'':'';
-			pending={segments:row?readings(row.text):[],translation:secondary(row),fontSize:style.fontSize||cfg.desktopFontSize||36,style,
+			pending={segments:row?readings(row.text):[],translation:secondary(row),reserveSecondary:mode!=='none',fontSize:style.fontSize||cfg.desktopFontSize||36,style,
 				rtSize:cfg.rtSize,rtOpacity:cfg.rtOpacity,karaoke,highlightTo:highlight,topmost:style.topmost===undefined?cfg.desktopTopmost!==false:style.topmost,locked:!!data.locked,playing:!!data.playing,bounds:bounds(cfg.desktopBounds),
 				next:next?{segments:readings(next.text),translation:secondary(next)}:null,
 				message:row?'':!track?'等待播放歌曲':!data.lines.length?'暂无歌词':position===null?'等待播放进度':data.title||'前奏'};

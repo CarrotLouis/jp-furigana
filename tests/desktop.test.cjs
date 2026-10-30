@@ -60,6 +60,7 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	f.api.set('desktopEnabled',true);await until(()=>f.host.inspect().ready);const first=f.sessions[0];
 	assert.equal(first.frames[0].fontSize,35,'Inherit original desktop font size');assert.equal(first.frames[0].style.fontFamily,'微软雅黑');
 	assert.equal(first.frames[0].style.colorBottom,'#ffb0b0');assert.equal(first.frames[0].translation,'看天空');assert(f.visibility.some(v=>v.hidden));
+	assert.equal(first.frames[0].reserveSecondary,true,'Enabled secondary lines keep their slot even when a translation is missing');
 	f.data={...f.data,style:{...f.data.style,mode:'roman'},lines:[{...f.data.lines[0],romaji:'so ra wo mi ru'},f.data.lines[1]]};f.nativeNotify();await until(()=>first.frames.at(-1).translation==='so ra wo mi ru');f.data={...f.data,style:{...f.data.style,mode:'translate'}};f.nativeNotify();await until(()=>first.frames.at(-1).translation==='看天空');
 	const clock=(id,sec)=>{for(const fn of f.callbacks.get('PlayProgress'))fn(id,sec);};
 	const before=f.resolutions;clock('1|play',1.2);clock('1|play',1.3);clock('old|play',8);await tick();assert.equal(f.resolutions,before,'Stable lines do not repeatedly tokenize or send frames');
@@ -74,6 +75,7 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	await first.emit({type:'unlock'});await until(()=>f.actions.some(a=>a.type==='unlock'));
 	await first.emit({type:'bounds',value:{x:12,y:34,width:700}});await until(()=>f.config.desktopBounds);assert.equal(f.config.desktopBounds.width,700);
 	f.api.set('desktopInheritStyle',false);f.api.set('desktopFontSize',54);f.api.set('desktopTranslation',false);await until(()=>first.frames.at(-1).fontSize===54);assert.equal(first.frames.at(-1).translation,'');
+	assert.equal(first.frames.at(-1).reserveSecondary,false,'Turning off secondary text releases its slot');
 	f.data={...f.data,lines:[{time:1,text:'作詞: 空ゆい子',translation:''}]};f.nativeNotify();clock('1|play',1.1);await until(()=>first.frames.at(-1).segments.map(s=>s.text).join('')==='作詞: 空ゆい子');assert(!first.frames.at(-1).segments.some(s=>s.rt),'Credit skipping must also guard raw dictionary adapters');
 	f.api.set('skipCredits',false);await until(()=>first.frames.at(-1).segments.some(s=>s.rt));f.api.set('skipCredits',true);await until(()=>!first.frames.at(-1).segments.some(s=>s.rt));
 	f.data={...f.data,songId:'2',playId:'2|play',currentText:'',lines:[]};f.nativeNotify();clock('1|play',90);await until(()=>first.frames.at(-1).message==='暂无歌词');assert.equal(first.frames.at(-1).segments.length,0,'Track changes clear stale text');
