@@ -2,9 +2,9 @@
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
 const { JSDOM } = require('jsdom');
 const src = path.resolve(__dirname, '../src'), manifest = require('../src/manifest.json');
-async function fixture(conflict, late = false) {
+async function fixture(conflict, late = false, desktopChoice) {
 	const dom = new JSDOM('<body><p id="original">原页面</p></body>', { url: 'https://music.163.com/', runScripts: 'outside-only', pretendToBeVisual: true });
-	const win = dom.window, handlers = {}, opened = [], legacy = JSON.stringify({ enabled: false, readingSource: 'dict', rtSize: 74, configVersion: 2 });
+	const win = dom.window, handlers = {}, opened = [], legacy = JSON.stringify({ enabled: false, readingSource: 'dict', rtSize: 74, configVersion: 2,...(desktopChoice===undefined?{}:{desktopEnabled:desktopChoice}) });
 	const oldCore = {}, oldDictionary = {}, oldLoader = () => {}, oldApi = {};
 	win.FuriganaCore = oldCore; win.kuromoji = oldDictionary; win.__FURIGANA_DICT_LOADER__ = oldLoader;
 	win.loadedPlugins = conflict && !late ? { 'jp-furigana': { manifest: { slug: 'jp-furigana' } } } : {};
@@ -26,6 +26,8 @@ async function fixture(conflict, late = false) {
 	} else {
 		assert(win.JPFuriganaPlus); assert(!win.JPFurigana);
 		assert.equal(win.JPFuriganaPlus.config.rtSize, 74, 'Copy earlier user settings once');
+		assert.equal(win.JPFuriganaPlus.config.desktopEnabled,desktopChoice===undefined?true:desktopChoice,'Desktop defaults on while preserving an explicitly saved choice');
+		assert.equal(win.JPFuriganaPlus.config.configVersion,3);
 		win.JPFuriganaPlus.set('rtSize', 81);
 		assert.equal(JSON.parse(win.localStorage.getItem('jp-furigana-plus.config')).rtSize, 81);
 		assert.equal(win.document.querySelector('#original').textContent, '原页面');
@@ -35,6 +37,6 @@ async function fixture(conflict, late = false) {
 	win.close();
 }
 (async () => {
-	await fixture(true); await fixture(true, true); await fixture(false);
+	await fixture(true); await fixture(true, true); await fixture(false);await fixture(false,false,false);await fixture(false,false,true);
 	console.log('Standalone passed: isolated globals/settings, safe migration, both plugin load orders, conflict UI and no original DOM/cache mutation.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

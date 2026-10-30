@@ -31,7 +31,7 @@ win.fetch = async () => ({ ok: true, json: async () => ({
 	lrc: { lyric: texts.map((text, i) => '[00:0' + (i + 1) + ']' + text).join('\n') },
 	romalrc: { lyric: '[00:01]ko i bi to to so ra wo mi ru\n[00:02]a ra ga e nu o ki do u no a n ga ka re wo tsu tsu n da\n[00:03]so ra wo mi ru hi' }
 }) });
-for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'rnp-settings.js', 'desktop.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
+for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'source-dialog.js', 'rnp-settings.js', 'desktop.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
 win.FuriganaPlusExternal.browserTransport = () => ({
 	dataRoot: async () => 'C:/BetterNCM',
 	fs: { mkdir: async () => true, exists: async p => disk.has(p), readFileText: async p => disk.get(p), writeFileText: async (p, value) => { disk.set(p, value); return true; } },
@@ -78,6 +78,21 @@ const assertScreenshot = (mode = 'hiragana') => {
 	assert.equal(panel.querySelector('.fg-external-settings').hidden, false);
 	assert(panel.querySelector('.fg-external-status').textContent.includes('UtaTen'));
 	assert(panel.querySelector('.fg-external-status').textContent.includes('网站命中 2 行；网易云音译回退 1 行'));
+	// Exercise the real settings -> dialog -> per-song persistence path.
+	const beforeManual = requests;
+	panel.querySelector('[data-a="externalAssign"]').click();
+	let sourceDialog = win.document.querySelector('.fg-source-dialog'); assert(sourceDialog);
+	sourceDialog.querySelector('[data-url]').value = 'https://utaten.com/search';
+	sourceDialog.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+	assert(sourceDialog.isConnected); assert.equal(requests, beforeManual);
+	sourceDialog.querySelector('[data-url]').value = 'https://www.utaten.com/lyric/test001/?from=test';
+	pending = null;
+	sourceDialog.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+	await until(() => pending); pending();
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().manualUrl);
+	assert.equal(JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).manualSource.url, 'https://utaten.com/lyric/test001/');
+	assert.equal(requests, beforeManual + 1, 'Manual selection requests the detail page directly');
+	assert(readings().includes('あなた'));
 	const proxy = panel.querySelector('[data-k="externalProxy"]');
 	proxy.value = 'http://user:password@127.0.0.1:7890'; proxy.dispatchEvent(new win.Event('change'));
 	assert(panel.querySelector('.fg-external-error').textContent.includes('账号密码'));
@@ -87,6 +102,21 @@ const assertScreenshot = (mode = 'hiragana') => {
 	rnpMenu.innerHTML = '<div class="rnp-settings-menu-tabs"><div class="rnp-settings-menu-tab" data-tab="lyric">歌词</div><div class="rnp-settings-menu-tab" data-tab="font">字体</div></div><div class="rnp-settings-menu-inner"><div class="rnp-group" data-tab="lyric"></div><div class="rnp-group" data-tab="font"></div></div>';
 	win.document.body.append(rnpMenu);
 	await until(() => rnpMenu.querySelector('[data-key="enabled"]'));
+	assert(!rnpMenu.querySelector('[data-action="desktopSettings"]'));
+	assert.equal(panel.querySelector('[data-k="desktopEnabled"]').checked, true, 'Desktop furigana defaults on');
+	const desktopEnabled = panel.querySelector('[data-k="desktopEnabled"]');
+	desktopEnabled.checked = false; desktopEnabled.dispatchEvent(new win.Event('change'));
+	assert(panel.querySelector('.fg-desktop-options').hidden); assert(rnpMenu.querySelector('[data-desktop-options]').hidden);
+	desktopEnabled.checked = true; desktopEnabled.dispatchEvent(new win.Event('change'));
+	assert(!panel.querySelector('.fg-desktop-options').hidden); assert(!rnpMenu.querySelector('[data-desktop-options]').hidden);
+	rnpMenu.querySelector('[data-action="assign"]').click();
+	sourceDialog = win.document.querySelector('.fg-source-dialog'); assert(sourceDialog);
+	assert.equal(sourceDialog.querySelector('[data-url]').value, 'https://utaten.com/lyric/test001/');
+	sourceDialog.querySelector('[data-url]').value = ''; pending = null;
+	sourceDialog.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
+	await until(() => pending); pending();
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading && !win.JPFuriganaPlus.externalStatus().manualUrl);
+	assert(!JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).manualSource);
 	const beforeStyleChange = requests;
 	const size = rnpMenu.querySelector('[data-key="rtSize"]'); size.value = '70'; size.dispatchEvent(new win.Event('input'));
 	assert.equal(win.JPFuriganaPlus.config.rtSize, 70); assert.equal(panel.querySelector('[data-k="rtSize"]').value, '70');

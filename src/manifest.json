@@ -41,6 +41,9 @@
 				"file": "desktop.js"
 			},
 			{
+				"file": "source-dialog.js"
+			},
+			{
 				"file": "main.js"
 			}
 		]

@@ -12,8 +12,8 @@
 		style.textContent = `
 			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-note { padding:0; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.5; opacity:.65; margin:0 0 20px; }
 			.rnp-group[data-tab="jp-furigana-plus"] .rnp-select-group-btn { white-space:normal; }
-			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-actions { display:flex; gap:8px; margin:0 0 20px; }
-			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-actions button { border-radius:6px; padding:6px; }
+			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-actions { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 20px; }
+			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-actions button { flex:1 1 120px; min-width:0; border-radius:6px; padding:6px; }
 			.rnp-group[data-tab="jp-furigana-plus"] button:disabled { opacity:.35; cursor:default; }
 			.rnp-group[data-tab="jp-furigana-plus"] [hidden] { display:none !important; }
 			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-subtitle { font-size:18px; opacity:.6; margin:20px 0; }
@@ -37,10 +37,10 @@
 				select('readingSource', '读音来源', [['romaji', '网易云'], ['dict', '词典'], ['external', '外部网站']]) +
 				'<div data-external>' + select('externalProvider', '外部网站范围', [['auto', '自动'], ['utaten', 'UtaTen'], ['utanet', 'Uta-Net']]) +
 				select('externalAutoRetry', '自动重新获取', [['off', '关闭'], ['failed', '失败后重试']]) +
-				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="retry">重新获取当前歌曲</button><button type="button" class="rnp-select-group-btn" data-action="source">查看来源网页</button></div>' +
+				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="retry">重新获取当前歌曲</button><button type="button" class="rnp-select-group-btn" data-action="source">查看来源网页</button><button type="button" class="rnp-select-group-btn" data-action="assign" title="支持手动指定 UtaTen 歌词页">手动指定歌词页</button></div>' +
 				'<p class="fg-rnp-note" role="status" data-status></p></div>' +
 				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="edit">进入编辑模式</button><button type="button" class="rnp-select-group-btn" data-action="manage">本地歌词管理</button></div>' + slider('rtSize', '注音大小', 60) + slider('rtOpacity', '注音不透明度', 80) +
-				'<div class="fg-rnp-subtitle">桌面歌词（实验）</div>' + checkbox('desktopEnabled', '启用注音桌面歌词') + checkbox('desktopInheritStyle', '沿用原桌面歌词样式') + '<div data-desktop-custom>' + checkbox('desktopTopmost', '桌面歌词置顶') + checkbox('desktopTranslation', '显示中文翻译') + slider('desktopFontSize', '桌面歌词字号', 36, 96) + '</div><div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="desktopSettings">桌面歌词设置</button><button type="button" class="rnp-select-group-btn" data-action="desktopUnlock">解锁</button></div><p class="fg-rnp-note" role="status" data-desktop-status></p>' +
+				'<div class="fg-rnp-subtitle">桌面歌词</div>' + checkbox('desktopEnabled', '启用注音桌面歌词') + '<div data-desktop-options>' + checkbox('desktopInheritStyle', '沿用原桌面歌词样式') + '<div data-desktop-custom>' + checkbox('desktopTopmost', '桌面歌词置顶') + checkbox('desktopTranslation', '显示中文翻译') + slider('desktopFontSize', '桌面歌词字号', 36, 96) + '</div></div><p class="fg-rnp-note" role="status" data-desktop-status></p>' +
 				'<div class="fg-rnp-subtitle">兼容</div>' + checkbox('karaoke', '逐字歌词模式') + checkbox('onlyFirstLine', '只给原文注音') +
 				checkbox('skipCredits', '跳过制作信息行') + checkbox('skipNoKanaLines', '跳过没有假名的行') + '<p class="fg-rnp-note" role="alert" data-error></p>';
 			lyricTab.after(tab); lyricGroup.after(group);
@@ -65,12 +65,14 @@
 				}
 				group.querySelector('[data-external]').hidden = config.readingSource !== 'external';
 				group.querySelector('[data-desktop-status]').textContent = info.desktop || '';
-				group.querySelector('[data-desktop-custom]').hidden = !!config.desktopInheritStyle;
-				for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) group.querySelector('[data-key="'+key+'"]').disabled = !!config.desktopInheritStyle;
+				group.querySelector('[data-desktop-options]').hidden = !config.desktopEnabled;
+				group.querySelector('[data-desktop-custom]').hidden = !config.desktopEnabled || !!config.desktopInheritStyle;
+				for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) group.querySelector('[data-key="'+key+'"]').disabled = !config.desktopEnabled || !!config.desktopInheritStyle;
 				const status = group.querySelector('[data-status]');
 				if (status.textContent !== info.text) status.textContent = info.text;
 				group.querySelector('[data-action="retry"]').disabled = !info.canRetry;
 				group.querySelector('[data-action="source"]').disabled = !info.canOpen;
+				group.querySelector('[data-action="assign"]').disabled = !info.canAssign;
 				group.querySelector('[data-action="edit"]').disabled = !info.editing && !info.canEdit;
 				group.querySelector('[data-action="edit"]').textContent = info.editing ? '退出编辑模式' : '进入编辑模式';
 			}
@@ -88,10 +90,9 @@
 				if (button.dataset.reset) commit(button.dataset.reset, Number(group.querySelector('[data-key="' + button.dataset.reset + '"]').getAttribute('default')));
 				if (button.dataset.action === 'retry') api.retry();
 				if (button.dataset.action === 'source') api.openSource();
+				if (button.dataset.action === 'assign') Promise.resolve(api.assignSource()).catch(e=>{group.querySelector('[data-error]').textContent=e.message;});
 				if (button.dataset.action === 'edit') Promise.resolve(api.toggleEditor()).catch(e => { group.querySelector('[data-error]').textContent = e.message; });
 				if (button.dataset.action === 'manage') api.openManager();
-				if (button.dataset.action === 'desktopSettings') api.desktopAction('setting');
-				if (button.dataset.action === 'desktopUnlock') api.desktopAction('unlock');
 			});
 			// RNP's scroll handler captures a static NodeList before our tab exists.
 			// Update the highlight after its handler, without replacing its navigation.

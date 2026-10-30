@@ -52,6 +52,7 @@ const tracks = [
 	{ id: '990000002', title: 'know me...', artists: ['八木海莉'] }
 ];
 if (utatenOnly) tracks.push({ id: '990000004', title: '残酷な天使のテーゼ', artists: ['高橋洋子'] });
+if (utatenOnly) tracks.push({ id: '990000005', title: '花 feat. 花譜', artists: ['Guiano','花譜'] });
 async function testProviders() {
 	const report = [];
 	for (const provider of utatenOnly ? ['utaten'] : diagnose ? ['utaten', 'utanet', 'auto'] : ['utaten', 'utanet']) for (const track of tracks) {

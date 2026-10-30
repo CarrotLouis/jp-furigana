@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana-plus]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFuriganaPlus.build）
-	const BUILD = 'desktop-experiment-1.6.0';
+	const BUILD = 'standalone-1.6.0';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana-plus.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -32,7 +32,7 @@
 		externalCacheDir: '', // default: <BetterNCM data>/lyrics/jp-furigana
 		rtSize: 60, // rt 相对底字的百分比
 		rtOpacity: 80, // rt 不透明度百分比
-		desktopEnabled: false,
+		desktopEnabled: true,
 		desktopInheritStyle: true,
 		desktopTopmost: true,
 		desktopTranslation: true,
@@ -65,7 +65,7 @@
 	// ------------------------------------------------------------------ 配置
 
 	// 改了某项默认值就 +1，让已经存过设置的用户也跟上（见 loadConfig）
-	const CONFIG_VERSION = 2;
+	const CONFIG_VERSION = 3;
 
 	function loadConfig() {
 		let saved = {};
@@ -92,6 +92,9 @@
 			cfg.rtSize = DEFAULTS.rtSize;
 			cfg.migrated = true;
 		}
+		// v3: desktop replacement defaults on for new/older configurations.
+		// An explicitly saved false remains the user's choice.
+		if (!(saved.configVersion >= 3)) cfg.migrated = true;
 		// 已经删掉的选项，别让旧配置里的残留值留着
 		delete cfg.useJapaneseFont;
 		delete cfg.font;
@@ -1783,6 +1786,17 @@
 		const info = externalClient && externalClient.inspect();
 		if (info && FuriganaPlusExternalCore.allowedURL(info.url)) betterncm.ncm.openUrl(info.url);
 	}
+	async function chooseExternalSource(){
+		if(!config.enabled||config.readingSource!=='external'||!getCurrentTrackId())throw new Error('请先播放歌曲并启用外部网站注音');
+		if(config.externalProvider==='utanet')throw new Error('手动指定 UtaTen 歌词页时，请将网站范围设为自动或 UtaTen');
+		const client=getExternalClient(),info=client.inspect(),id=getCurrentTrackId();
+		const selected=await FuriganaPlusSourceDialog.open({trackId:getCurrentTrackId,url:info.songId===id?(info.manualUrl||(info.source==='utaten'?info.url:'')):'',validate:FuriganaPlusExternalCore.utatenURL});
+		if(!selected)return;
+		if(getCurrentTrackId()!==selected.songId||!config.enabled||config.readingSource!=='external')throw new Error('歌曲或读音来源已变化，请重新指定');
+		state.externalTrackId=selected.songId;state.externalForce=false;
+		await client.setSource(selected.songId,()=>currentTrackMetadata(selected.songId),config,selected.url);
+		invalidateAll();schedule(0);notifyConfigUI();
+	}
 	function fallbackForEdit(text) {
 		const romaji = state.apiRomaji && state.apiRomaji.get(FuriganaPlusCore.lyricKey(text));
 		return romaji && getSegmentsFromRomaji(text, romaji) || getSegments(text);
@@ -1969,7 +1983,7 @@
 				<div class="fg-hint">“仅查询”限制外部网站来源；加载期间及未匹配的行仍沿用网易云音译 / 词典。网站命中的行采用网站读音，保留原歌词和时间轴。网站注音也可能有错。</div>
 				<div class="fg-external-error" role="alert"></div>
 				<div class="fg-external-status" role="status" style="white-space:pre-wrap;font-size:12px;margin:8px 0"></div>
-				<div class="fg-row"><button data-a="externalRetry">重新获取当前歌曲</button><button data-a="externalSource">查看来源网页</button></div>
+				<div class="fg-row"><button data-a="externalRetry">重新获取当前歌曲</button><button data-a="externalSource">查看来源网页</button><button data-a="externalAssign" title="支持手动指定 UtaTen 歌词页">手动指定歌词页</button></div>
 			</section>
 			<div class="fg-row"><button data-a="editMode">进入编辑模式</button><button data-a="cacheManager">本地歌词管理</button></div>
 			<div class="fg-row">
@@ -1983,16 +1997,18 @@
 				<span data-v="rtOpacity"></span>
 			</div>
 
-			<h3>桌面歌词（实验）</h3>
+			<h3>桌面歌词</h3>
 			<div class="fg-row"><label><input type="checkbox" data-k="desktopEnabled"> 启用注音桌面歌词</label></div>
+			<div class="fg-desktop-options">
 			<div class="fg-row"><label><input type="checkbox" data-k="desktopInheritStyle"> 沿用原桌面歌词的字体、颜色、字号与布局</label></div>
 			<div class="fg-desktop-custom">
 			<div class="fg-row"><label><input type="checkbox" data-k="desktopTopmost"> 桌面歌词置顶</label><label><input type="checkbox" data-k="desktopTranslation"> 显示中文翻译</label></div>
 			<div class="fg-row"><label>桌面歌词字号</label><input type="range" data-k="desktopFontSize" min="20" max="96" step="1"><span data-v="desktopFontSize"></span></div>
 			</div>
 			<div class="fg-row"><button data-a="desktopSettings">原桌面歌词设置</button><button data-a="desktopUnlock">解锁桌面歌词</button></div>
-			<div class="fg-desktop-status" role="status"></div>
 			<div class="fg-hint">原桌面歌词开关控制显示和关闭；开启注音后自动替换，停用时恢复。拖动歌词移动，Ctrl + 滚轮调整字号；锁定后鼠标穿透，可在此解锁。</div>
+			</div>
+			<div class="fg-desktop-status" role="status"></div>
 
 			<h3>兼容</h3>
 			<div class="fg-row"><label><input type="checkbox" data-k="karaoke"> 逐字歌词模式（把注音分发到每个字/词，保留逐字高亮动画）</label></div>
@@ -2021,8 +2037,9 @@
 		function refreshStatus() {
 			const desktopStatus = root.querySelector('.fg-desktop-status');
 			desktopStatus.textContent = desktop ? desktop.inspect().status : '';
-			root.querySelector('.fg-desktop-custom').hidden = config.desktopInheritStyle;
-			for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) root.querySelector('[data-k="'+key+'"]').disabled = config.desktopInheritStyle;
+			root.querySelector('.fg-desktop-options').hidden = !config.desktopEnabled;
+			root.querySelector('.fg-desktop-custom').hidden = !config.desktopEnabled || config.desktopInheritStyle;
+			for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) root.querySelector('[data-k="'+key+'"]').disabled = !config.desktopEnabled || config.desktopInheritStyle;
 			const section = root.querySelector('.fg-external-settings');
 			section.hidden = config.readingSource !== 'external';
 			const info = externalClient && externalClient.inspect();
@@ -2030,6 +2047,7 @@
 			if (externalStatus.textContent !== text) externalStatus.textContent = text;
 			root.querySelector('[data-a="externalSource"]').disabled = !(info && info.url);
 			root.querySelector('[data-a="externalRetry"]').disabled = !config.enabled || !getCurrentTrackId();
+			root.querySelector('[data-a="externalAssign"]').disabled = !config.enabled || !getCurrentTrackId() || config.externalProvider==='utanet';
 			const editButton = root.querySelector('[data-a="editMode"]');
 			editButton.textContent = editor && editor.isEnabled() ? '退出编辑模式' : '进入编辑模式';
 			editButton.disabled = !(editor && editor.isEnabled()) && (!getCurrentTrackId() || !state.tokenizer);
@@ -2090,6 +2108,7 @@
 		};
 		onClick('externalRetry', retryExternal);
 		onClick('externalSource', openExternalSource);
+		onClick('externalAssign',()=>chooseExternalSource().catch(error=>{root.querySelector('.fg-external-error').textContent=error.message;}));
 		onClick('desktopSettings', () => desktopAction('setting'));
 		onClick('desktopUnlock', () => desktopAction('unlock'));
 		onClick('editMode', () => toggleEditor().catch(e => { root.querySelector('.fg-external-error').textContent = e.message; }));
@@ -2206,10 +2225,11 @@
 			config: () => config, set: setConfigValue,
 			status: () => { const info = externalClient && externalClient.inspect(); return { text: compactExternalStatus(),
 				canRetry: config.enabled && config.readingSource === 'external' && !!getCurrentTrackId(), canOpen: !!(info && info.url),
+				canAssign:config.enabled&&config.readingSource==='external'&&!!getCurrentTrackId()&&config.externalProvider!=='utanet',
 				editing: !!(editor && editor.isEnabled()), canEdit: !!(getCurrentTrackId() && state.tokenizer), desktop:desktop ? desktop.inspect().status : '' }; },
 			subscribe: fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },
 			retry: retryExternal, openSource: openExternalSource,
-			desktopAction,
+			assignSource:chooseExternalSource,
 			toggleEditor, openManager: () => editor && editor.openManager(),
 		});
 		window.JPFuriganaPlus = {

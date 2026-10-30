@@ -8,9 +8,9 @@ const markup = '<div class="rnp-settings-menu"><div class="rnp-settings-menu-tab
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true });
 const doc = dom.window.document, listeners = new Set();
 const config = { enabled: true, readingSource: 'external', externalProvider: 'auto', externalAutoRetry: 'failed', rtSize: 60, rtOpacity: 80, karaoke: true, onlyFirstLine: true, skipCredits: true, skipNoKanaLines: true, desktopEnabled:false, desktopInheritStyle:true, desktopTopmost:true, desktopTranslation:true, desktopFontSize:36 };
-let retries = 0, opens = 0; const desktopActions = [];
-const api = { config: () => config, status: () => ({ text: '测试状态', canRetry: config.enabled, canOpen: true }), subscribe: f => { listeners.add(f); return () => listeners.delete(f); },
-	set: (key, value) => { config[key] = value; for (const f of listeners) f(); }, retry: () => retries++, openSource: () => opens++, desktopAction: type => desktopActions.push(type) };
+let retries = 0, opens = 0,assignments=0;
+const api = { config: () => config, status: () => ({ text: '测试状态', canRetry: config.enabled, canOpen: true,canAssign:config.enabled&&config.externalProvider!=='utanet' }), subscribe: f => { listeners.add(f); return () => listeners.delete(f); },
+	set: (key, value) => { config[key] = value; for (const f of listeners) f(); }, retry: () => retries++, openSource: () => opens++,assignSource:()=>assignments++ };
 const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeout(resolve, 30));
 (async () => {
 	assert.equal(listeners.size, 0, 'RNP is optional');
@@ -23,7 +23,12 @@ const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeou
 	assert.equal(group.querySelectorAll('[data-key]').length, 12); // Includes optional desktop controls and native style inheritance.
 	assert.equal(group.querySelectorAll('[data-choice]').length, 3);
 	assert(group.querySelector('[data-desktop-custom]').hidden);
-	group.querySelector('[data-action="desktopSettings"]').click(); group.querySelector('[data-action="desktopUnlock"]').click(); assert.deepEqual(desktopActions,['setting','unlock']);
+	assert(group.querySelector('[data-desktop-options]').hidden);
+	assert(!group.querySelector('[data-action="desktopSettings"],[data-action="desktopUnlock"]'),'RNP must not duplicate native desktop settings/unlock actions');
+	api.set('desktopEnabled',true);assert(!group.querySelector('[data-desktop-options]').hidden);assert(group.querySelector('[data-desktop-custom]').hidden);
+	api.set('desktopInheritStyle',false);assert(!group.querySelector('[data-desktop-custom]').hidden);assert(!group.querySelector('[data-key="desktopFontSize"]').disabled);
+	api.set('desktopEnabled',false);assert(group.querySelector('[data-desktop-options]').hidden);assert(group.querySelector('[data-desktop-custom]').hidden);assert(group.querySelector('[data-key="desktopFontSize"]').disabled);
+	api.set('desktopEnabled',true);assert(!group.querySelector('[data-desktop-custom]').hidden,'Re-enabling preserves the custom-style choice');
 	const enabled = group.querySelector('[data-key="enabled"]'); enabled.checked = false; enabled.dispatchEvent(new dom.window.Event('change'));
 	assert.equal(config.enabled, false); assert(group.querySelector('[data-action="retry"]').disabled);
 	api.set('enabled', true); assert(enabled.checked);
@@ -36,6 +41,7 @@ const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeou
 	group.querySelector('[data-reset="rtSize"]').click(); assert.equal(config.rtSize, 60);
 	for (const key of ['karaoke', 'onlyFirstLine', 'skipCredits', 'skipNoKanaLines']) { const input = group.querySelector('[data-key="' + key + '"]'); input.checked = false; input.dispatchEvent(new dom.window.Event('change')); assert.equal(config[key], false); }
 	group.querySelector('[data-action="retry"]').click(); group.querySelector('[data-action="source"]').click(); assert.equal(retries, 1); assert.equal(opens, 1);
+	group.querySelector('[data-action="assign"]').click();assert.equal(assignments,1);api.set('externalProvider','utanet');assert(group.querySelector('[data-action="assign"]').disabled);api.set('externalProvider','utaten');assert(!group.querySelector('[data-action="assign"]').disabled);
 	[...inner.children].forEach((n, i) => Object.defineProperty(n, 'offsetTop', { value: i * 200 }));
 	inner.scrollTo = options => { inner.scrollTop = options.top; inner.dispatchEvent(new dom.window.Event('scroll')); };
 	// Simulate a stale native scroll handler registered before/after extension initialization.

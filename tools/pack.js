@@ -36,6 +36,7 @@ const SRC_FILES = [
 	'editor.js',
 	'rnp-settings.js',
 	'desktop.js',
+	'source-dialog.js',
 	'desktop-host.exe',
 	'external-fetch.ps1',
 	'cache-write.ps1',
@@ -68,10 +69,10 @@ function crc32(buf) {
 
 /** ZIP 用的 DOS 时间戳，秒只有 2 秒精度 */
 function dosDateTime(date) {
-	const year = Math.max(1980, date.getFullYear());
+	const year = Math.max(1980, date.getUTCFullYear());
 	return {
-		time: (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1),
-		date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+		time: (date.getUTCHours() << 11) | (date.getUTCMinutes() << 5) | (date.getUTCSeconds() >> 1),
+		date: ((year - 1980) << 9) | ((date.getUTCMonth() + 1) << 5) | date.getUTCDate(),
 	};
 }
 
@@ -220,4 +221,5 @@ function main() {
 	}
 }
 
-main();
+if(require.main===module)main();
+module.exports={collect,buildZip};
