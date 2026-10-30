@@ -1,4 +1,4 @@
-// Opt-in Windows smoke test. Fetches only two named songs; keeps copyrighted HTML/cache private.
+// Opt-in Windows smoke test. Fetches named songs; keeps copyrighted HTML/cache private.
 // Run: node tools/test-external-live.cjs
 // --diagnose records each provider's availability, including automatic fallback,
 // without aborting at the first website outage. It skips the slower proxy test.
@@ -12,6 +12,7 @@ const privateRoot = path.resolve(__dirname, '../tests/private');
 const activeChildren = new Set(), sockets = new Set();
 let count = 0;
 const diagnose = process.argv.includes('--diagnose');
+const utatenOnly = process.argv.includes('--utaten');
 const bn = {
 	app: {
 		getDataPath: async () => privateRoot,
@@ -50,9 +51,10 @@ const tracks = [
 	{ id: '990000001', title: '恋人を射ち堕とした日', artists: ['Sound Horizon'] },
 	{ id: '990000002', title: 'know me...', artists: ['八木海莉'] }
 ];
+if (utatenOnly) tracks.push({ id: '990000004', title: '残酷な天使のテーゼ', artists: ['高橋洋子'] });
 async function testProviders() {
 	const report = [];
-	for (const provider of diagnose ? ['utaten', 'utanet', 'auto'] : ['utaten', 'utanet']) for (const track of tracks) {
+	for (const provider of utatenOnly ? ['utaten'] : diagnose ? ['utaten', 'utanet', 'auto'] : ['utaten', 'utanet']) for (const track of tracks) {
 		const client = clientModule.create({ ...transport, request: measuredRequest });
 		const start = performance.now();
 		await client.load(track.id, async () => track, { externalProvider: provider }, true);
@@ -144,7 +146,7 @@ async function testProxy() {
 	if (process.platform !== 'win32') throw new Error('Windows is required for the actual transport smoke test');
 	await fs.mkdir(privateRoot, { recursive: true });
 	const providers = await testProviders();
-	const proxy = diagnose ? { skipped: true } : await testProxy();
+	const proxy = diagnose || utatenOnly ? { skipped: true } : await testProxy();
 	const report = { providers, proxy, requests: count };
 	await fs.writeFile(path.join(privateRoot, 'live-report.json'), JSON.stringify(report, null, 2));
 	console.log(JSON.stringify(report, null, 2));

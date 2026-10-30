@@ -55,6 +55,8 @@ socks5h://127.0.0.1:1080
 
 请求由 Windows 自带 `curl.exe` 完成，因此不受浏览器 CORS 限制，也无需全局更改网易云的代理。PowerShell 只用于启动、收取结果和退出，不更改执行策略。所有动态输入作为 Base64 JSON 数据传递，不作为命令执行。TLS 验证保持开启，重定向只允许两个歌词网站的 HTTPS 地址。
 
+1.5.3 为 UtaTen 请求补充固定的 `Referer: https://utaten.com/`，与网站正常搜索时的来源一致。实测缺少该头的搜索请求会收到 HTTP 200、`Content-Length: 0`，相同网络及查询参数补上该头后返回正常候选列表；仅改 User-Agent 无法解决。该请求头不包含本地路径、代理配置或正在播放的歌曲信息。
+
 ## 缓存与资源占用
 
 默认路径：`<BetterNCM 数据目录>/lyrics/jp-furigana/<网易云歌曲 ID>.json`。例如默认 BetterNCM 安装为 `C:\betterncm` 时，路径是 `C:\betterncm\lyrics\jp-furigana\`。
