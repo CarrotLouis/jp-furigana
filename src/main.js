@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'upstream-1.6.3-r3';
+	const BUILD = 'upstream-1.6.3-r4';
 	const REPO_URL = 'https://github.com/Leleawa/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -442,7 +442,7 @@
 			const original = FuriganaCore.parseLrc(lrc);
 			const yrc = typeof FuriganaDesktop !== 'undefined' ? FuriganaDesktop.yrcTimeline(json.yrc && json.yrc.lyric) : [];
 			if (getCurrentTrackId() === trackId) {
-				state.evidence = { songId:trackId, lines:[...original,...yrc].map(l=>l.text) };
+				state.evidence = { songId:trackId, lines:[...original,...yrc].map(l=>l.text), alignmentLines:(original.length>=yrc.length?original:yrc).map(l=>l.text) };
 				if (typeof FuriganaDesktop !== 'undefined') state.desktopLyrics = { songId:trackId,
 					lines:original.length ? FuriganaDesktop.lrcTimeline(lrc, json.tlyric && json.tlyric.lyric, FuriganaCore.parseLrc, json.yrc && json.yrc.lyric, roma) : yrc };
 			}
@@ -482,10 +482,21 @@
 	// ------------------------------------------------------ 外部网站（按需联网）
 	let externalClient = null, desktop = null;
 	let editor = null, playPending = false, playPendingTarget = null, editPreparing = false, editEntry = 0;
+	let alignmentNative = null, alignmentOriginals = null;
+	function currentOriginalLines(id) {
+		if(id!==getCurrentTrackId())return null;
+		const evidence=state.evidence && state.evidence.songId===id ? state.evidence : null;
+		if(evidence && evidence.alignmentLines && evidence.alignmentLines.length)return evidence.alignmentLines;
+		const native=nativeTrackLines(id);
+		if(!native.length)return evidence && evidence.lines || null;
+		if(native!==alignmentNative){alignmentNative=native;alignmentOriginals=native.map(l=>l.text);}
+		return alignmentOriginals;
+	}
 	function getExternalClient() {
 		if (!externalClient && typeof FuriganaExternal !== 'undefined') {
 			externalClient = FuriganaExternal.create({
 				...FuriganaExternal.browserTransport(betterncm, plugin),
+				originalLines:currentOriginalLines,
 				lyrics: async id => {
 					if (state.evidence && state.evidence.songId === id) return state.evidence.lines;
 					const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 8000);
@@ -983,12 +994,13 @@
 	// diverge between the playing page and the desktop window.
 	function resolveReadings(text) {
 		if (getCurrentTrackId() && currentTrackLanguage().eligible !== true) return { segments:[{text}], source:null };
-		if (!state.tokenizer || shouldSkipLine(text) || !FuriganaCore.hasKanji(text)) return { segments:[{text}], source:null };
+		if (!state.tokenizer || shouldSkipLine(text)) return { segments:[{text}], source:null };
 		let segments = null, source = 'dict';
 		if (config.readingSource === 'external' && externalClient && state.externalTrackId === getCurrentTrackId()) {
 			segments = externalClient.segments(text, config.kana, getSegmentsFromRomaji);
 			if (segments) source = 'external';
 		}
+		if(!segments && !FuriganaCore.hasKanji(text))return {segments:[{text}],source:null};
 		if (!segments && (config.readingSource === 'romaji' || config.readingSource === 'external') && state.apiRomaji) {
 			const romaji = state.apiRomaji.get(FuriganaCore.lyricKey(text));
 			if (romaji) { segments = getSegmentsFromRomaji(text, romaji); if (segments) source = 'romaji'; }
@@ -1012,7 +1024,7 @@
 			line.__fgHosts = [];
 			return false;
 		}
-		if (!FuriganaCore.hasKanji(text)) {
+		if (!FuriganaCore.hasKanji(text) && config.readingSource !== 'external') {
 			line.__fgText = text;
 			line.__fgHosts = [];
 			return false;

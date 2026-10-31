@@ -21,14 +21,14 @@ assert.notEqual(core.key('週末'),core.key('終末'),'Homophones must not becom
 assert(!core.matches({title:'終末の手紙',artists:['試験歌手']},{title:'週末の手紙',artists:['試験歌手']}));
 assert.equal(match('終末',prepare([{text:'週末',segments:[{text:'週末',rt:'しゅうまつ'}]}])),null,'A short isolated word has insufficient context');
 const otherWord={text:weekend.line.text.replace('週末','週章'),segments:weekend.line.segments.map(s=>s.text==='週末'?{text:'週章',rt:'しゅうしょう'}:s)};
-assert.equal(match(weekend.target.replace('終末','終章'),prepare([otherWord])),null,'終/週 is allowed only inside 終末/週末');
-assert.equal(match(weekend.target.replace('やる','いる'),prepare([weekend.line])),null,'Do not absorb unrelated kana changes');
-assert.equal(match(weekend.target+'ね',prepare([weekend.line])),null,'Do not infer an insertion');
+assert(match(weekend.target.replace('終末','終章'),prepare([otherWord])),'High-confidence full lines no longer require an approved word pair');
+assert(match(weekend.target.replace('やる','いる'),prepare([weekend.line])),'Limited kana differences may also be aligned');
+assert(match(weekend.target+'ね',prepare([weekend.line])),'Confirmed wording differences can include insertions');
 const conflicting=structuredClone(weekend.line);conflicting.segments.find(s=>s.text==='旗').rt='ふらぐ';
 assert.equal(match(weekend.target,prepare([weekend.line,conflicting])),null,'Conflicting contextual readings remain ambiguous');
 const exactWeekend=structuredClone(reverse);exactWeekend.segments.find(s=>s.text==='旗').rt='ふらぐ';
 assert(pairs(match(weekend.target,prepare([weekend.line,exactWeekend]))).some(([text,rt])=>text==='旗'&&rt==='ふらぐ'),'Exact website text still takes priority');
-assert.equal(core.segmentsFor(weekend.target,core.prepare({provider:'utanet',lines:[{text:weekend.line.text,romaji:'unused'}]}),'hiragana',()=>{throw Error('Do not apply this rule to romaji');}),null);
+assert(core.segmentsFor(weekend.target,core.prepare({provider:'utanet',lines:[{text:weekend.line.text,romaji:'website-romaji'}]}),'hiragana',text=>{assert.equal(text,weekend.line.text);return weekend.line.segments;}),'Uta-Net also resolves the website text before mapping');
 const editableRecord={schema:1,songId:'1',provider:'utaten',url:'https://utaten.com/lyric/test/',lines:[weekend.line],userEdits:[]};
 const baseline=match(weekend.target,prepare(editableRecord.lines));
 const editable=edits.annotate(editableRecord,weekend.target,baseline,'hiragana'),flag=editable.find(s=>s.text==='旗').edit;
@@ -54,7 +54,7 @@ assert.equal(match(target.replace('彼', '君')), null, 'Do not use fuzzy edit d
 assert.equal(match(target.replace('が', 'も')), null, 'Kana changes must not be inferred');
 assert.equal(match(target + 'よ'), null, 'Do not guess an insertion/deletion');
 const unrelated = { text: '沖縄で見た空は青かった', segments: [{ text: '沖縄', rt: 'おきなわ' }, { text: 'で見た空は青かった' }] };
-assert.equal(match(unrelated.text.replace('沖', '衝'), prepare([unrelated])), null, 'The 沖/衝 confusion is limited to 衝動');
+assert(match(unrelated.text.replace('沖', '衝'), prepare([unrelated])), 'A high-confidence full line does not depend on specific kanji pairs');
 const tooMany = { text: '闇の闇の闇の中を歩いた', segments: [{ text: '闇', rt: 'やみ' }, { text: 'の闇の闇の中を歩いた' }] };
 assert.equal(match(tooMany.text.replaceAll('闇', '暗'), prepare([tooMany])), null, 'Limit substitutions even in a long line');
 const ambiguous = structuredClone(line);
@@ -66,7 +66,7 @@ exact.text = exact.segments.map(s => s.text).join('');
 assert(pairs(match(target, prepare([line, exact]))).some(([text, rt]) => text === '暗' && rt === 'あん'), 'Exact website text takes priority over contextual matching');
 const merged = prepare([{ text: '星が光る', segments: [{ text: '星', rt: 'ほし' }, { text: 'が光る' }] }, line]);
 assert(match('星が光る ' + target, merged), 'Adjacent website lines may be merged by the client');
-assert.equal(core.segmentsFor(target, core.prepare({ provider: 'utanet', lines: [{ text: line.text, romaji: 'unused' }] }), 'hiragana', () => { throw new Error('Never use contextual matching for romaji'); }), null);
+assert(core.segmentsFor(target, core.prepare({ provider: 'utanet', lines: [{ text: line.text, romaji: 'website-romaji' }] }), 'hiragana', text=>{assert.equal(text,line.text);return line.segments;}));
 // Independent synthetic sentences cover the script variants found near the screenshot.
 for (const [client, website] of [['彈', '弾'], ['焰', '焔'], ['回', '廻'], ['涂', '塗'], ['傳', '伝'], ['說', '説'], ['咒', '呪'], ['駈', '駆'], ['溯', '遡'], ['淚', '涙'], ['絕', '絶']]) {
 	const text = '🌟「' + client + 'の文字」';

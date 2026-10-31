@@ -168,7 +168,7 @@
 		function announce(text) { status = text; if (deps.onStatus) deps.onStatus(); }
 		const alive = g => g === generation;
 		function cancelRetry() { if (cancelWait) cancelWait(); }
-		function reset() { generation++; cancelRetry(); loading = false; currentId = null; current = null; groups = []; source = ''; lastError = ''; warning = ''; lineCache.clear(); }
+		function reset() { generation++; cancelRetry(); loading = false; currentId = null; current = null; groups = []; originalLines = null; source = ''; lastError = ''; warning = ''; lineCache.clear(); }
 		function stop() { reset(); announce('未启用外部网站'); }
 		function cancelFetch() {
 			if (!loading) return false;
@@ -197,13 +197,15 @@
 			if (!await deps.fs.mkdir(path)) throw new Error('无法创建歌词缓存目录');
 			return path.replace(/\/$/, '');
 		}
+		let originalLines = null;
+		const originals = () => deps.originalLines ? deps.originalLines(currentId) : null;
 		function accept(record, cached, g, cacheWarning = '', preserveRequest = false) {
 			if (!alive(g)) return;
 			if (!preserveRequest) { lastError = ''; warning = cacheWarning; }
 			current = record; lineCache.clear();
 			const scope = lastSettings && lastSettings.externalProvider;
 			source = scope && scope !== 'auto' && record.provider !== scope ? 'local' : record.provider;
-			groups = source === 'local' ? [] : core.prepare(record);
+			originalLines=originals();groups = source === 'local' ? [] : core.prepare(record,originalLines);
 			if (!preserveRequest) announce((cached ? '本地缓存' : '已获取') + ' · ' + (source === 'local' ? '本地人工纠音' : source === 'utaten' ? 'UtaTen 振假名' : '歌ネット罗马音') + ' · ' + record.lines.length + ' 行' + warning);
 			if (deps.onReady) deps.onReady();
 		}
@@ -363,6 +365,8 @@
 		}
 		function segments(text, mode, fromRomaji) {
 			if (!current || source === 'local') return null;
+			const next=originals();
+			if(next!==originalLines){originalLines=next;groups=core.prepare(current,originalLines);lineCache.clear();}
 			const k = mode + '|' + text;
 			if (!lineCache.has(k)) {
 				if (lineCache.size > 1000) lineCache.clear();
@@ -406,7 +410,7 @@
 				const { raw, record } = await read(path, anchor.songId);
 				const local = anchor.provider === 'local';
 				const baseline = edits.annotate(local ? { ...record, provider: 'local', url: '' } : record, anchor.line,
-					local ? fallback(anchor.line) : core.segmentsFor(anchor.line, core.prepare(record), 'hiragana', fromRomaji), 'hiragana');
+					local ? fallback(anchor.line) : core.segmentsFor(anchor.line, core.prepare(record,originals()), 'hiragana', fromRomaji), 'hiragana');
 				const match = baseline && baseline.find(s => s.edit && edits.key(s.edit) === edits.key(anchor));
 				if (!match || match.edit.reading !== anchor.reading) throw new Error('本地读音已变化，请取消后重新打开编辑框');
 				const next = edits.update(record, anchor, value);
