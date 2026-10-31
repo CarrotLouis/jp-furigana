@@ -200,8 +200,10 @@
 		for (let i = 0; i < target.length; i++) {
 			if (target[i] === source[i]) continue;
 			const pair = target[i] + source[i];
-			if (pair !== '暗闇' && pair !== '闇暗' &&
-				!((pair === '沖衝' || pair === '衝沖') && target[i + 1] === '動' && source[i + 1] === '動')) return false;
+			const wordConfusion = target[i + 1] === source[i + 1] && (
+				((pair === '沖衝' || pair === '衝沖') && target[i + 1] === '動') ||
+				((pair === '終週' || pair === '週終') && target[i + 1] === '末'));
+			if (pair !== '暗闇' && pair !== '闇暗' && !wordConfusion) return false;
 			if (++differences > 2) return false;
 		}
 		return differences > 0;

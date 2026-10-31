@@ -1,11 +1,41 @@
 'use strict';
 const assert = require('node:assert/strict');
 const core = require('../src/external-core.js');
+const edits = require('../src/user-edits.js');
 const { target, line } = require('./fixtures/utaten-confusions.cjs');
+const weekend = require('./fixtures/utaten-weekend.cjs');
 const prepare = lines => core.prepare({ provider: 'utaten', lines });
 const groups = prepare([line]);
 const match = (text, data = groups, mode = 'hiragana') => core.segmentsFor(text, data, mode);
 const pairs = segments => segments.filter(s => s.rt).map(s => [s.text, s.rt]);
+for(const text of [weekend.target,'🌟「'+weekend.target+'！」']){
+	const result=match(text,prepare([weekend.line]));
+	assert(result,'The screenshot differs only in 終末/週末; the whole line must retain website readings');
+	assert.equal(result.map(s=>s.text).join(''),text,'Keep the client original including punctuation and supplementary Unicode');
+	assert.deepEqual(pairs(result),[['終末','しゅうまつ'],['旗','はた'],['送','おく']]);
+}
+assert.deepEqual(pairs(match(weekend.target,prepare([weekend.line]),'katakana')),[['終末','シュウマツ'],['旗','ハタ'],['送','オク']]);
+const reverse=structuredClone(weekend.line);reverse.text=weekend.target;reverse.segments[0].text='終末';
+assert.deepEqual(pairs(match(weekend.line.text,prepare([reverse]))),[['週末','しゅうまつ'],['旗','はた'],['送','おく']]);
+assert.notEqual(core.key('週末'),core.key('終末'),'Homophones must not become global text or title aliases');
+assert(!core.matches({title:'終末の手紙',artists:['試験歌手']},{title:'週末の手紙',artists:['試験歌手']}));
+assert.equal(match('終末',prepare([{text:'週末',segments:[{text:'週末',rt:'しゅうまつ'}]}])),null,'A short isolated word has insufficient context');
+const otherWord={text:weekend.line.text.replace('週末','週章'),segments:weekend.line.segments.map(s=>s.text==='週末'?{text:'週章',rt:'しゅうしょう'}:s)};
+assert.equal(match(weekend.target.replace('終末','終章'),prepare([otherWord])),null,'終/週 is allowed only inside 終末/週末');
+assert.equal(match(weekend.target.replace('やる','いる'),prepare([weekend.line])),null,'Do not absorb unrelated kana changes');
+assert.equal(match(weekend.target+'ね',prepare([weekend.line])),null,'Do not infer an insertion');
+const conflicting=structuredClone(weekend.line);conflicting.segments.find(s=>s.text==='旗').rt='ふらぐ';
+assert.equal(match(weekend.target,prepare([weekend.line,conflicting])),null,'Conflicting contextual readings remain ambiguous');
+const exactWeekend=structuredClone(reverse);exactWeekend.segments.find(s=>s.text==='旗').rt='ふらぐ';
+assert(pairs(match(weekend.target,prepare([weekend.line,exactWeekend]))).some(([text,rt])=>text==='旗'&&rt==='ふらぐ'),'Exact website text still takes priority');
+assert.equal(core.segmentsFor(weekend.target,core.prepare({provider:'utanet',lines:[{text:weekend.line.text,romaji:'unused'}]}),'hiragana',()=>{throw Error('Do not apply this rule to romaji');}),null);
+const editableRecord={schema:1,songId:'1',provider:'utaten',url:'https://utaten.com/lyric/test/',lines:[weekend.line],userEdits:[]};
+const baseline=match(weekend.target,prepare(editableRecord.lines));
+const editable=edits.annotate(editableRecord,weekend.target,baseline,'hiragana'),flag=editable.find(s=>s.text==='旗').edit;
+assert.equal(flag.line,weekend.target);assert.equal(flag.start,2);assert.equal(flag.original,'はた');
+const revised=edits.update(editableRecord,flag,'ふらぐ');
+assert(edits.annotate(revised,weekend.target,baseline,'hiragana').some(s=>s.text==='旗'&&s.rt==='ふらぐ'),'User edits retain priority over the contextual website reading');
+assert.equal(revised.lines[0].text,weekend.line.text,'Manual correction must not rewrite cached website lyrics');
 for (const text of [target, target.replace('沖', '冲'), '「' + target + '！」']) {
 	const result = match(text);
 	assert(result, 'Full contextual match must use the website despite the transcription confusions');
