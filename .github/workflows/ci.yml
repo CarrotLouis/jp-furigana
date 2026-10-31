@@ -43,41 +43,24 @@ jobs:
           node tools/pack.js
           unzip -t builds/jp-furigana.plugin
 
-  windows-native:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jp-furigana-plugin
+          path: builds/jp-furigana.plugin
+          if-no-files-found: error
+
+  windows-save:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: 从公开源码重新编译桌面组件并自测
-        shell: powershell
-        run: |
-          Remove-Item -LiteralPath src/desktop-host.exe -Force
-          ./tools/build-desktop-host.ps1 -Check
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Windows 原子保存及桌面 IPC / 生命周期
-        run: |
-          node tests/cache-write.test.cjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/desktop-native.test.cjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: 打包本次编译的插件与来源记录
-        run: |
-          node tools/pack.js
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tools/native-build-info.cjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: jp-furigana-plugin
-          path: |
-            builds/jp-furigana.plugin
-            builds/native-build-info.json
-            src/desktop-host.exe
-          if-no-files-found: error
+      - name: Windows 原子保存
+        run: node tests/cache-write.test.cjs
 
   release:
-    needs: [test, windows-native]
+    needs: [test, windows-save]
     # Preserve upstream main -> v<manifest.version>. Fork pushes only run checks.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Leleawa/jp-furigana'
     runs-on: ubuntu-latest
@@ -108,4 +91,4 @@ jobs:
           else
             git log --no-merges -10 --pretty='- %s' > "$notes"
           fi
-          gh release create "$tag" release-artifact/builds/jp-furigana.plugin release-artifact/builds/native-build-info.json --title "$version" --notes-file "$notes"
+          gh release create "$tag" release-artifact/jp-furigana.plugin --title "$version" --notes-file "$notes"

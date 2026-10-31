@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'upstream-1.6.3-r4';
+	const BUILD = 'upstream-1.6.3-web';
 	const REPO_URL = 'https://github.com/Leleawa/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -32,12 +32,6 @@
 		externalCacheDir: '', // default: <BetterNCM data>/lyrics/jp-furigana
 		rtSize: 60, // rt 相对底字的百分比
 		rtOpacity: 80, // rt 不透明度百分比
-		desktopEnabled: true,
-		desktopInheritStyle: true,
-		desktopTopmost: true,
-		desktopTranslation: true,
-		desktopFontSize: 36,
-		desktopBounds: null,
 		karaoke: true, // 逐字歌词：把注音按字符偏移分发到内部的 span，保留逐字动画
 		onlyFirstLine: true, // 一行里只给原文注音，跳过翻译/罗马音
 		skipCredits: true, // 跳过「作词:／编曲:」这类制作信息行
@@ -92,9 +86,9 @@
 			cfg.rtSize = DEFAULTS.rtSize;
 			cfg.migrated = true;
 		}
-		// v3: desktop replacement defaults on for new/older configurations.
-		// An explicitly saved false remains the user's choice.
+		// Retain the current configuration revision without bringing Plus-only settings.
 		if (!(saved.configVersion >= 3)) cfg.migrated = true;
+		for (const key of Object.keys(cfg)) if (key.startsWith('desktop')) { delete cfg[key]; cfg.migrated = true; }
 		// 已经删掉的选项，别让旧配置里的残留值留着
 		delete cfg.useJapaneseFont;
 		delete cfg.font;
@@ -405,18 +399,18 @@
 		return id ? String(id) : null;
 	}
 
-	function nativeTrackLines(songId) {
-		if (!songId || typeof FuriganaDesktop === 'undefined') return [];
+	function clientTrackLines(songId) {
+		if (!songId) return [];
 		const root = state.store && state.store.getState(), lyric = root && root['async:lyric'];
-		if (lyric !== desktopNative || songId !== desktopNativeId) {
-			desktopNative = lyric; desktopNativeId = songId;
-			desktopNativeLines = FuriganaDesktop.nativeTimeline(lyric, songId, FuriganaCore.parseLrc);
+		if (lyric !== clientLyricSource || songId !== clientLyricId) {
+			clientLyricSource = lyric; clientLyricId = songId;
+			clientLyricLines = FuriganaCore.clientOriginalLines(lyric, songId);
 		}
-		return desktopNativeLines;
+		return clientLyricLines;
 	}
 	let languageLines = null;
 	function currentTrackLanguage() {
-		const songId = getCurrentTrackId(), native = nativeTrackLines(songId);
+		const songId = getCurrentTrackId(), native = clientTrackLines(songId);
 		const evidence = state.evidence && state.evidence.songId === songId ? state.evidence.lines : null;
 		const lines = evidence && evidence.length ? evidence : native.length ? native : evidence;
 		if (lines && languageLines === lines && state.language && state.language.songId === songId) return state.language;
@@ -440,11 +434,9 @@
 			if (!res.ok) throw new Error('HTTP ' + res.status);
 			const json = await res.json(), lrc = json.lrc && json.lrc.lyric, roma = json.romalrc && json.romalrc.lyric;
 			const original = FuriganaCore.parseLrc(lrc);
-			const yrc = typeof FuriganaDesktop !== 'undefined' ? FuriganaDesktop.yrcTimeline(json.yrc && json.yrc.lyric) : [];
+			const yrc = FuriganaCore.parseYrc(json.yrc && json.yrc.lyric);
 			if (getCurrentTrackId() === trackId) {
 				state.evidence = { songId:trackId, lines:[...original,...yrc].map(l=>l.text), alignmentLines:(original.length>=yrc.length?original:yrc).map(l=>l.text) };
-				if (typeof FuriganaDesktop !== 'undefined') state.desktopLyrics = { songId:trackId,
-					lines:original.length ? FuriganaDesktop.lrcTimeline(lrc, json.tlyric && json.tlyric.lyric, FuriganaCore.parseLrc, json.yrc && json.yrc.lyric, roma) : yrc };
 			}
 			if (!lrc || !roma) return new Map();
 			return FuriganaCore.buildRomajiMap(lrc, roma);
@@ -480,14 +472,14 @@
 	}
 
 	// ------------------------------------------------------ 外部网站（按需联网）
-	let externalClient = null, desktop = null;
+	let externalClient = null;
 	let editor = null, playPending = false, playPendingTarget = null, editPreparing = false, editEntry = 0;
 	let alignmentNative = null, alignmentOriginals = null;
 	function currentOriginalLines(id) {
 		if(id!==getCurrentTrackId())return null;
 		const evidence=state.evidence && state.evidence.songId===id ? state.evidence : null;
 		if(evidence && evidence.alignmentLines && evidence.alignmentLines.length)return evidence.alignmentLines;
-		const native=nativeTrackLines(id);
+		const native=clientTrackLines(id);
 		if(!native.length)return evidence && evidence.lines || null;
 		if(native!==alignmentNative){alignmentNative=native;alignmentOriginals=native.map(l=>l.text);}
 		return alignmentOriginals;
@@ -990,8 +982,7 @@
 		return hostsText(line) === line.__fgText;
 	}
 
-	// Both views resolve readings here so website data and user corrections cannot
-	// diverge between the playing page and the desktop window.
+	// Rendering and editing resolve website readings and user corrections here.
 	function resolveReadings(text) {
 		if (getCurrentTrackId() && currentTrackLanguage().eligible !== true) return { segments:[{text}], source:null };
 		if (!state.tokenizer || shouldSkipLine(text)) return { segments:[{text}], source:null };
@@ -1823,11 +1814,10 @@
 		if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) throw new Error('未知设置项');
 		if (!editPreparing && ['readingSource','externalProvider','externalCacheDir','externalProxy','externalProxyEnabled'].includes(key)) {editEntry++;state.editInterrupt=null;}
 		if (key === 'externalProxy') value = FuriganaExternal.validateProxy(value);
-		if (key === 'rtSize' || key === 'rtOpacity' || key === 'desktopFontSize') {
+		if (key === 'rtSize' || key === 'rtOpacity') {
 			value = Number(value); if (!Number.isFinite(value)) throw new Error('请输入有效数值');
-			value = Math.max(20, Math.min(key === 'desktopFontSize' ? 96 : 100, Math.round(value)));
+			value = Math.max(20, Math.min(100, Math.round(value)));
 		}
-		if (key === 'desktopBounds') { value = FuriganaDesktop.bounds(value); if (!value) throw new Error('无效的桌面歌词位置'); }
 		const choices = { readingSource: ['romaji', 'dict', 'external'], externalProvider: ['auto', 'utaten', 'utanet'], externalAutoRetry: ['off', 'failed'], kana: ['hiragana', 'katakana'] };
 		if (choices[key] && !choices[key].includes(value)) throw new Error('无效的设置选项');
 		if (typeof DEFAULTS[key] === 'boolean') value = !!value;
@@ -1948,70 +1938,7 @@
 		if (info.loading || info.error || !info.ready) return (track ? track + '\n' : '') + info.status;
 		return track + (info.warning ? '\n' + info.warning : '');
 	}
-	let desktopNative = null, desktopNativeId = null, desktopNativeLines = [];
-	function desktopSnapshot(options = {}) {
-		const songId = getCurrentTrackId();
-		if (songId) ensureApiRomaji();
-		const root = state.store && state.store.getState(), playing = root && root.playing || {};
-		const native = nativeTrackLines(songId), language = currentTrackLanguage();
-		const lines = native.length ? native : state.desktopLyrics && state.desktopLyrics.songId === songId ? state.desktopLyrics.lines : [];
-		if (config.enabled) ensureExternal();
-		const current = options.needCurrentText && document.querySelector('.rnp-lyrics-line[offset="0"] .rnp-lyrics-line-original,.rnp-lyrics-line[offset="0"] .rnp-lyrics-line-karaoke');
-		return { songId, playId:String(playing.playId || ''), lines,
-			eligible:language.eligible === true,languageStatus:language.status,
-			title:playing.resourceName || playing.curTrack && playing.curTrack.name || '',
-			currentText:current && isVisible(current) ? plainText(current) : '',
-			nativeVisible:!!(root && root.setting && root.setting.showLyric), playing:playing.playingState === 2,
-			locked:!!(root && root.setting && root.setting.desktopLyricLockState),style:FuriganaDesktop.nativeStyle(root && root.setting || {}) };
-	}
-	let desktopVisibilityVersion = 0, desktopWorkArea = null;
-	function desktopNativeCall(name, args) {
-		return new Promise((resolve,reject) => {
-			const timer = setTimeout(() => reject(new Error('原桌面歌词接口响应超时')),3000);
-			try { channel.call(name,result => {clearTimeout(timer);resolve(result);},args); }
-			catch(e) {clearTimeout(timer);reject(e);}
-		});
-	}
-	async function desktopVisibility(hidden,restore = true) {
-		const version = ++desktopVisibilityVersion;
-		if (!desktopWorkArea) { const info = await desktopNativeCall('os.getSystemInfo',['monitor']); desktopWorkArea = info && info.workArea; }
-		if (version !== desktopVisibilityVersion) return;
-		const root = state.store && state.store.getState();
-		const show = !hidden && restore && !!(root && root.setting && root.setting.showLyric);
-		await desktopNativeCall('winhelper.setNativeWindowShow',['desktop_lyrics',show,desktopWorkArea || {}]);
-	}
-	function desktopAction(type,value) {
-		if (!state.store) return;
-		const setting = state.store.getState().setting || {};
-		if (type === 'setting') FuriganaDesktop.openSettings(state.store);
-		else if (type === 'translation') {
-			if (!config.desktopInheritStyle) setConfigValue('desktopTranslation',!config.desktopTranslation);
-			else state.store.dispatch({type:'setting/changeLyricMode',payload:{type:'translate',checked:setting.lyricMode!=='translate'}});
-		} else if (type === 'fontSize') {
-			const size = Math.max(20,Math.min(96,Math.round(Number(value)||36)));
-			if (!config.desktopInheritStyle) setConfigValue('desktopFontSize',size);
-			else FuriganaDesktop.setFontSize(state.store,size);
-		} else if (['detail','offset_back','offset_forward','playprev','play_pause','playnext','lock','unlock','close'].includes(type)) {
-			state.store.dispatch({type:'setting/handleDesktopLyricAction',payload:{type}});
-		}
-	}
-	function watchDesktop(callback) {
-		let unsubscribe = null, timer = null, stopped = false;
-		function attach() {
-			if (stopped) return;
-			getCurrentTrackId();
-			if (!state.store) {timer=setTimeout(attach,1000);return;}
-			let previous = state.store.getState();
-			unsubscribe = state.store.subscribe(() => {
-				const next = state.store.getState(), p = previous.playing || {}, q = next.playing || {};
-				const changed = next.setting !== previous.setting;
-				const refresh = changed || next['async:lyric'] !== previous['async:lyric'] || p.playId !== q.playId || p.playingState !== q.playingState;
-				previous = next;
-				if (refresh) callback(changed);
-			});
-		}
-		attach();return () => {stopped=true;clearTimeout(timer);if(unsubscribe)unsubscribe();};
-	}
+	let clientLyricSource = null, clientLyricId = null, clientLyricLines = [];
 
 	function buildConfigUI() {
 		const root = document.createElement('div');
@@ -2095,19 +2022,6 @@
 				<span data-v="rtOpacity"></span>
 			</div>
 
-			<h3>桌面歌词</h3>
-			<div class="fg-row"><label><input type="checkbox" data-k="desktopEnabled"> 启用注音桌面歌词</label></div>
-			<div class="fg-desktop-options">
-			<div class="fg-row"><label><input type="checkbox" data-k="desktopInheritStyle"> 沿用原桌面歌词的字体、颜色、字号与布局</label></div>
-			<div class="fg-desktop-custom">
-			<div class="fg-row"><label><input type="checkbox" data-k="desktopTopmost"> 桌面歌词置顶</label><label><input type="checkbox" data-k="desktopTranslation"> 显示中文翻译</label></div>
-			<div class="fg-row"><label>桌面歌词字号</label><input type="range" data-k="desktopFontSize" min="20" max="96" step="1"><span data-v="desktopFontSize"></span></div>
-			</div>
-			<div class="fg-row"><button data-a="desktopSettings">原桌面歌词设置</button><button data-a="desktopUnlock">解锁桌面歌词</button></div>
-			<div class="fg-hint">原桌面歌词开关控制显示和关闭；开启注音后自动替换，停用时恢复。拖动歌词移动，Ctrl + 滚轮调整字号；锁定后鼠标穿透，可在此解锁。</div>
-			</div>
-			<div class="fg-desktop-status" role="status"></div>
-
 			<h3>兼容</h3>
 			<div class="fg-row"><label><input type="checkbox" data-k="karaoke"> 逐字歌词模式（把注音分发到每个字/词，保留逐字高亮动画）</label></div>
 			<div class="fg-row"><label><input type="checkbox" data-k="onlyFirstLine"> 只给原文注音，跳过翻译和罗马音</label></div>
@@ -2133,11 +2047,6 @@
 		}
 
 		function refreshStatus() {
-			const desktopStatus = root.querySelector('.fg-desktop-status');
-			desktopStatus.textContent = desktop ? desktop.inspect().status : '';
-			root.querySelector('.fg-desktop-options').hidden = !config.desktopEnabled;
-			root.querySelector('.fg-desktop-custom').hidden = !config.desktopEnabled || config.desktopInheritStyle;
-			for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) root.querySelector('[data-k="'+key+'"]').disabled = !config.desktopEnabled || config.desktopInheritStyle;
 			const section = root.querySelector('.fg-external-settings');
 			section.hidden = config.readingSource !== 'external';
 			const info = externalClient && externalClient.inspect();
@@ -2163,7 +2072,7 @@
 
 		// 滑块旁边那行数值怎么显示
 		const sliderDrafts = new Map();
-		const fmt = (key) => (sliderDrafts.has(key) ? sliderDrafts.get(key) : config[key]) + (key === 'desktopFontSize' ? 'px' : '%');
+		const fmt = (key) => (sliderDrafts.has(key) ? sliderDrafts.get(key) : config[key]) + '%';
 
 		root.querySelectorAll('[data-k]').forEach((el) => {
 			const key = el.dataset.k;
@@ -2213,8 +2122,6 @@
 		onClick('externalRetry', retryExternal);
 		onClick('externalSource', openExternalSource);
 		onClick('externalAssign',()=>chooseExternalSource().catch(error=>{root.querySelector('.fg-external-error').textContent=error.message;}));
-		onClick('desktopSettings', () => desktopAction('setting'));
-		onClick('desktopUnlock', () => desktopAction('unlock'));
 		onClick('editMode', () => toggleEditor().catch(e => { root.querySelector('.fg-external-error').textContent = e.message; }));
 		onClick('cacheManager', () => editor && editor.openManager());
 		onClick('rescan', () => {
@@ -2297,22 +2204,12 @@
 			manage: (row, action) => getExternalClient().manage(row.songId, { ...config, externalCacheDir: row.path.slice(0, row.path.lastIndexOf('/')) }, action),
 			play: playCached,
 		});
-		if (typeof FuriganaDesktop !== 'undefined') desktop = FuriganaDesktop.host({
-			config:() => config, set:setConfigValue, snapshot:desktopSnapshot,
-			transport:FuriganaDesktop.browserTransport(betterncm,plugin),
-			readings:text => resolveReadings(text).segments,
-			skip:shouldSkipLine,
-			visibility:desktopVisibility, action:desktopAction, watch:watchDesktop,
-			bounds:value => {if (JSON.stringify(config.desktopBounds)!==JSON.stringify(value)) {config.desktopBounds=value;saveConfig();}},
-			subscribe:fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },
-			changed:notifyConfigUI,
-		});
 		if (typeof FuriganaRnpSettings !== 'undefined') FuriganaRnpSettings.install({
 			config: () => config, set: setConfigValue,
 			status: () => { const info = externalClient && externalClient.inspect(), editState=editorButtonState(); return { text: compactExternalStatus(),editText:editState.text,editWarning:editState.warning,
 				canRetry: config.enabled && config.readingSource === 'external' && !!getCurrentTrackId() && currentTrackLanguage().eligible !== false, canOpen: !!(currentTrackLanguage().eligible === true && info && info.url && info.songId === getCurrentTrackId()),
 				canAssign:config.enabled&&config.readingSource==='external'&&currentTrackLanguage().eligible === true&&config.externalProvider!=='utanet',
-				editing: !!(editor && editor.isEnabled()), canEdit: !!(currentTrackLanguage().eligible === true && state.tokenizer), desktop:desktop ? desktop.inspect().status : '' }; },
+				editing: !!(editor && editor.isEnabled()), canEdit: !!(currentTrackLanguage().eligible === true && state.tokenizer) }; },
 			subscribe: fn => { configRefreshers.add(fn); return () => configRefreshers.delete(fn); },
 			retry: retryExternal, openSource: openExternalSource,
 			assignSource:chooseExternalSource,
@@ -2335,7 +2232,6 @@
 			pass: () => schedule(0),
 			segments: (text) => (state.tokenizer ? getSegments(text) : null),
 			readings: text => resolveReadings(text).segments,
-			desktop: () => desktop && desktop.inspect(),
 			trackId: getCurrentTrackId,
 			romajiMap: () => state.apiRomaji,
 			externalStatus: () => externalClient && externalClient.inspect(),
@@ -2346,7 +2242,6 @@
 				schedule(0);
 			},
 		};
-		if (desktop) desktop.sync();
 		console.log(
 			LOG,
 			`已加载 ${BUILD}${DEV ? '（开发模式）' : ''}，` +

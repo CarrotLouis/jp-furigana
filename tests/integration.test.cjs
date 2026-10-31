@@ -34,7 +34,7 @@ win.fetch = async () => ({ ok: true, json: async () => ({
 	lrc: { lyric: texts.map((text, i) => '[00:0' + (i + 1) + ']' + text).join('\n') },
 	romalrc: { lyric: '[00:01]ko i bi to to so ra wo mi ru\n[00:02]a ra ga e nu o ki do u no a n ga ka re wo tsu tsu n da\n[00:03]so ra wo mi ru hi\n[00:04]shu u ma tsu ki wo ku tte ya ru ka ra' }
 }) });
-for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'source-dialog.js', 'rnp-settings.js', 'desktop.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
+for (const file of ['furigana.js', 'external-core.js', 'user-edits.js', 'external.js', 'editor.js', 'source-dialog.js', 'rnp-settings.js']) win.eval(fs.readFileSync(path.join(src, file), 'utf8'));
 win.FuriganaExternal.browserTransport = () => ({
 	dataRoot: async () => 'C:/BetterNCM',
 	fs: { mkdir: async () => true, exists: async p => disk.has(p), readFileText: async p => disk.get(p), readDir:async()=>[...disk.keys()],remove:async p=>disk.delete(p),writeFileText: async (p, value) => { disk.set(p, value); return true; } },
@@ -82,10 +82,10 @@ const assertScreenshot = (mode = 'hiragana') => {
 	assert(readings(3).includes('き'),'Reproduce the incorrect local reading of 旗 while the website is pending');
 	pending();
 	await until(() => readings().includes('あなた'));
-	assert(win.JPFurigana.readings(original).some(s => s.text === '恋人' && s.rt === 'あなた'), 'Desktop resolver must use the same website readings as the playing page');
-	assert(win.JPFurigana.readings(weekend.target).some(s=>s.text==='旗'&&s.rt==='はた'),'The desktop resolver must share the contextual website fix');
-	assert(win.JPFurigana.readings('かんじ').some(s=>s.rt==='かんじ'),'Desktop and lyric page share original-line context even for kana-only variants');
-	assert(!win.JPFurigana.readings('作詞: 空ゆい子').some(s=>s.rt),'Desktop resolver inherits credit skipping even when the artist has kana');
+	assert(win.JPFurigana.readings(original).some(s => s.text === '恋人' && s.rt === 'あなた'), 'Public resolver must use the same website readings as the playing page');
+	assert(win.JPFurigana.readings(weekend.target).some(s=>s.text==='旗'&&s.rt==='はた'),'The public resolver must share the contextual website fix');
+	assert(win.JPFurigana.readings('かんじ').some(s=>s.rt==='かんじ'),'Public resolver and lyric page share original-line context even for kana-only variants');
+	assert(!win.JPFurigana.readings('作詞: 空ゆい子').some(s=>s.rt),'Public resolver inherits credit skipping even when the artist has kana');
 	assert.equal(win.JPFurigana.state.srcExternal, 7);
 	assert.equal(win.JPFurigana.state.srcRomaji, 1, 'An actually unmatched line still falls back');
 	assertScreenshot();
@@ -121,27 +121,8 @@ const assertScreenshot = (mode = 'hiragana') => {
 	rnpMenu.innerHTML = '<div class="rnp-settings-menu-tabs"><div class="rnp-settings-menu-tab" data-tab="lyric">歌词</div><div class="rnp-settings-menu-tab" data-tab="font">字体</div></div><div class="rnp-settings-menu-inner"><div class="rnp-group" data-tab="lyric"></div><div class="rnp-group" data-tab="font"></div></div>';
 	win.document.body.append(rnpMenu);
 	await until(() => rnpMenu.querySelector('[data-key="enabled"]'));
-	assert(!rnpMenu.querySelector('[data-action="desktopSettings"]'));
-	assert.equal(panel.querySelector('[data-k="desktopEnabled"]').checked, true, 'Desktop furigana defaults on');
-	const desktopEnabled = panel.querySelector('[data-k="desktopEnabled"]');
-	desktopEnabled.checked = false; desktopEnabled.dispatchEvent(new win.Event('change'));
-	assert(panel.querySelector('.fg-desktop-options').hidden); assert(rnpMenu.querySelector('[data-desktop-options]').hidden);
-	desktopEnabled.checked = true; desktopEnabled.dispatchEvent(new win.Event('change'));
-	assert(!panel.querySelector('.fg-desktop-options').hidden); assert(!rnpMenu.querySelector('[data-desktop-options]').hidden);
-	const rnpDesktopEnabled = rnpMenu.querySelector('[data-key="desktopEnabled"]');
-	rnpDesktopEnabled.checked = false; rnpDesktopEnabled.dispatchEvent(new win.Event('change'));
-	rnpDesktopEnabled.checked = true; rnpDesktopEnabled.dispatchEvent(new win.Event('change'));
-	win.JPFurigana.set('desktopEnabled', false); win.JPFurigana.set('desktopEnabled', true);
-	assert.equal(settingActions.length, 0, 'Both settings pages and the API must leave the native desktop-lyrics switch untouched');
-	rnpMenu.querySelector('[data-action="assign"]').click();
-	await until(() => win.document.querySelector('.fg-source-dialog'));
-	sourceDialog = win.document.querySelector('.fg-source-dialog'); assert(sourceDialog);
-	assert.equal(sourceDialog.querySelector('[data-url]').value, 'https://utaten.com/lyric/test001/');
-	sourceDialog.querySelector('[data-url]').value = ''; pending = null;
-	sourceDialog.dispatchEvent(new win.Event('submit', { bubbles: true, cancelable: true }));
-	await until(() => pending); pending();
-	await until(() => !win.JPFurigana.externalStatus().loading && !win.JPFurigana.externalStatus().manualUrl);
-	assert(!JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).manualSource);
+	assert(!panel.querySelector('[data-k^="desktop"]')&&!rnpMenu.querySelector('[data-key^="desktop"]'),'Web build exposes no desktop controls');
+	assert.equal(settingActions.length,0,'Web settings never dispatch native playback/settings actions');
 	const beforeStyleChange = requests;
 	const size = rnpMenu.querySelector('[data-key="rtSize"]'); size.value = '70'; size.dispatchEvent(new win.Event('input'));
 	assert.equal(win.JPFurigana.config.rtSize,60,'Range input must not persist or remeasure annotations');
@@ -179,7 +160,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 	await until(() => lyricLines()[0].querySelector('.fg-edit-custom')?.textContent === 'きみ');
 	assert.equal(lyricLines()[0].querySelector('.fg-edit-original').textContent, 'あなた');
-	assert(win.JPFurigana.readings(original).some(s => s.text === '恋人' && s.rt === 'きみ'), 'Desktop shares saved user corrections');
+	assert(win.JPFurigana.readings(original).some(s => s.text === '恋人' && s.rt === 'きみ'), 'Public resolver shares saved user corrections');
 	assert.equal(baseText(lyricLines()[0]), original);
 	if (rnp) assert(lyricLines()[0].querySelector('.rnp-karaoke-word-filler .fg-edit-custom'));
 	assert.equal(JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).userEdits[0].reading, 'きみ');

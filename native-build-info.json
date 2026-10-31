@@ -1,9 +1,0 @@
-{
-  "version": "1.6.3",
-  "sourceCommit": "7e44c4ea12741410d53219dffc195422cdfe3dfe",
-  "workflow": "https://github.com/CarrotLouis/jp-furigana/actions/runs/41176661209",
-  "nativeSourceSha256": "90780906699f83324a5ddb42dff1a26e3d2c72e24ab67b20719b4262470f215e",
-  "nativeBuildScriptSha256": "79ffb8b51357255a25971a1cd1951bfb72f13c0e2c582bee50c02fccdfce8ae8",
-  "nativeExecutableSha256": "f480e12cc170a9d566f0ac60f1ac7622da8069c241a368238b5669aba989d826",
-  "pluginSha256": "17b40c57d224fba425abee03647a2976fbc18a5634f2f0bf18f2cb40c93e4cec"
-}

@@ -1071,6 +1071,23 @@
 		return out;
 	}
 
+	// Original YRC text is also needed for language detection and line matching.
+	// This parser has no window, playback, rendering or native-process dependency.
+	function parseYrc(src) {
+		const rows=[];
+		for(const line of String(src||'').split(/\r?\n/)) {
+			const head=/^\[(\d+),(\d+)\]/.exec(line);if(!head)continue;
+			const parts=[...line.slice(head[0].length).matchAll(/\((\d+),(\d+),\d+\)([^()]*)/g)];
+			const text=parts.map(p=>p[3].replace(/\s/g,'')).join('');
+			if(text)rows.push({time:Number(head[1]),text});
+		}
+		return rows;
+	}
+	function clientOriginalLines(lyric,songId) {
+		if(!lyric || String(lyric.resourceTrackId)!==String(songId))return [];
+		const lines=Array.isArray(lyric.lyricLines)?lyric.lyricLines.filter(l=>Number.isFinite(l.time)&&typeof l.lyric==='string').map(l=>({time:l.time*1000,text:l.lyric})):[];
+		return lines.length?lines.sort((a,b)=>a.time-b.time):parseYrc(lyric.yrcInfo&&lyric.yrcInfo.yrc);
+	}
 	return {
 		KANJI_RANGE: KANJI,
 		LOOKUP_VARIANTS,
@@ -1087,6 +1104,8 @@
 		UNKNOWN,
 		segmentsFromReading,
 		parseLrc,
+		parseYrc,
+		clientOriginalLines,
 		lyricKey,
 		isCreditLine,
 		hasJapaneseLyrics,

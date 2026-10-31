@@ -41,7 +41,6 @@
 				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="retry">重新获取当前歌曲</button><button type="button" class="rnp-select-group-btn" data-action="source">查看来源网页</button><button type="button" class="rnp-select-group-btn" data-action="assign" title="支持手动指定 UtaTen 歌词页">手动指定歌词页</button></div>' +
 				'<p class="fg-rnp-note" role="status" data-status></p></div>' +
 				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="edit">进入编辑模式</button><button type="button" class="rnp-select-group-btn" data-action="manage">本地歌词管理</button></div>' + slider('rtSize', '注音大小', 60) + slider('rtOpacity', '注音不透明度', 80) +
-				'<div class="fg-rnp-subtitle">桌面歌词</div>' + checkbox('desktopEnabled', '启用注音桌面歌词') + '<div data-desktop-options>' + checkbox('desktopInheritStyle', '沿用原桌面歌词样式') + '<div data-desktop-custom>' + checkbox('desktopTopmost', '桌面歌词置顶') + checkbox('desktopTranslation', '显示中文翻译') + slider('desktopFontSize', '桌面歌词字号', 36, 96) + '</div></div><p class="fg-rnp-note" role="status" data-desktop-status></p>' +
 				'<div class="fg-rnp-subtitle">兼容</div>' + checkbox('karaoke', '逐字歌词模式') + checkbox('onlyFirstLine', '只给原文注音') +
 				checkbox('skipCredits', '跳过制作信息行') + checkbox('skipNoKanaLines', '跳过没有假名的行') + '<p class="fg-rnp-note" role="alert" data-error></p>';
 			lyricTab.after(tab); lyricGroup.after(group);
@@ -54,7 +53,7 @@
 					else {
 						el.value = value;
 						const out = group.querySelector('[data-value-for="' + el.dataset.key + '"]');
-						const text = value + (el.dataset.key === 'desktopFontSize' ? 'px' : '%');
+						const text = value + '%';
 						if (out.textContent !== text) out.textContent = text;
 						el.parentElement.classList.toggle('changed', String(value) !== el.getAttribute('default'));
 						const percent = (value - Number(el.min)) / (Number(el.max) - Number(el.min)) * 100;
@@ -66,10 +65,6 @@
 					button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected));
 				}
 				group.querySelector('[data-external]').hidden = config.readingSource !== 'external';
-				group.querySelector('[data-desktop-status]').textContent = info.desktop || '';
-				group.querySelector('[data-desktop-options]').hidden = !config.desktopEnabled;
-				group.querySelector('[data-desktop-custom]').hidden = !config.desktopEnabled || !!config.desktopInheritStyle;
-				for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) group.querySelector('[data-key="'+key+'"]').disabled = !config.desktopEnabled || !!config.desktopInheritStyle;
 				const status = group.querySelector('[data-status]');
 				if (status.textContent !== info.text) status.textContent = info.text;
 				group.querySelector('[data-action="retry"]').disabled = !info.canRetry;

@@ -21,7 +21,7 @@ async function fixture(existing, desktopChoice) {
 	assert(win.JPFurigana,'Original slug must not detect itself as a conflict');assert(!win.JPFuriganaPlus);
 	assert.equal(win.FuriganaPlusCore,plusCore);assert.equal(win.kuromojiFuriganaPlus,plusDictionary);assert.equal(win.__FURIGANA_PLUS_DICT_LOADER__,plusLoader);
 	assert.equal(win.JPFurigana.config.rtSize,existing?66:74,'Existing upstream preferences take priority; copy Plus only when absent');
-	assert.equal(win.JPFurigana.config.desktopEnabled,existing?false:desktopChoice===undefined?true:desktopChoice);
+	assert(!Object.keys(win.JPFurigana.config).some(key=>key.startsWith('desktop')),'Legacy Plus-only desktop preferences are removed from upstream configuration');
 	assert.equal(win.JPFurigana.config.configVersion,3);
 	win.JPFurigana.set('rtSize',81);assert.equal(JSON.parse(win.localStorage.getItem('jp-furigana.config')).rtSize,81);
 	assert.equal(win.localStorage.getItem('jp-furigana-plus.config'),plusSettings);assert.equal(win.localStorage.getItem('jp-furigana-plus.cache.v4'),'keep-plus-cache');
