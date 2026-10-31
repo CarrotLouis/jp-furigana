@@ -20,7 +20,7 @@ const settings = { externalProvider: 'utaten', externalAutoRetry: 'failed' };
  const insufficient = fixture(async url => url.includes('/search') ? '<table>' + row('a') + '</table>' : page([lines[0], '知らない名前を呼んでみたのです']));
  await insufficient.client.load('1', metadata, settings); assert.equal(insufficient.files.size, 0);
  let searches = 0, failed = false;
- const retry = fixture(async url => { if (url.includes('artist_name=')) { searches++; return '<table></table>'; } if (url.includes('/search')) return '<table>' + row('a') + '</table>'; if (!failed) { failed = true; throw requestError({ curlCode: 28 }); } return page(lines); });
+ const retry = fixture(async url => { if (url.includes('artist_name=')) { searches++; return '<table></table>'; } if (url.includes('/search')) return '<table>' + row('a') + '</table>'; if (!failed) { failed = true; throw requestError({ timeout: true }); } return page(lines); });
  await retry.client.load('1', metadata, settings); assert.equal(searches, 2, 'Network retry restarts one whole matching workflow'); assert.equal(retry.client.inspect().source, 'utaten');
  console.log('Relaxed matching passed: title-only search, multiple lyric fragments, false/ambiguous matches rejected, one workflow per attempt.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

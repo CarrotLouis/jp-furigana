@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const core = require('../src/external-core.js');
-const { create, validateProxy } = require('../src/external.js');
+const { create } = require('../src/external.js');
 const documentFor = html => new JSDOM(html).window.document;
 const track = { title: '星の手紙', artists: ['試験歌手'] };
 const search = `<table class="searchResult"><tr><td class="searchResult__title"><a href="/lyric/test001/">星の手紙</a></td><td class="searchResult__artist"><p><a>試験歌手</a></p></td></tr></table>`;
@@ -28,9 +28,6 @@ assert.equal(core.segmentsFor('恋人と空をみる', core.prepare(other), 'hir
 assert(!core.allowedURL('https://utaten.com.evil.test/'));
 assert(!core.allowedURL('https://user@utaten.com/'));
 assert(!core.allowedURL('file:///C:/secret'));
-assert.throws(() => validateProxy('http://user:pass@localhost:7890'));
-assert.throws(() => validateProxy('http://localhost:7890\n;calc'));
-assert.equal(validateProxy('socks5h://127.0.0.1:1080'), 'socks5h://127.0.0.1:1080');
 const utaSearch = '<table><tr><td><a href="/song/12/"><span class="songlist-title">星の手紙</span></a></td><td><a href="/artist/1/">試験歌手</a></td></tr></table>';
 const candidate = core.searchResults(documentFor(utaSearch), 'utanet')[0];
 assert(core.matches(candidate, track));
@@ -51,7 +48,7 @@ function fixture(request) {
 	});
 	return { files, client, ready: () => ready, metadata: () => { metadata++; return Promise.resolve(track); }, metadataCount: () => metadata };
 }
-const settings = { externalProvider: 'auto', externalProxyEnabled: false };
+const settings = { externalProvider: 'auto' };
 (async () => {
 	let requests = 0;
 	const a = fixture(async url => { requests++; return url.includes('/search') ? search : song; });
@@ -99,5 +96,5 @@ const settings = { externalProvider: 'auto', externalProxyEnabled: false };
 	const bad = fixture(async () => search.replace('試験歌手', '別の歌手'));
 	await bad.client.load('1', bad.metadata, { ...settings, externalProvider: 'utaten' });
 	assert.equal(bad.files.size, 0); assert.equal(bad.ready(), 0);
-	console.log('External tests passed: parsers, preserved text, variant glyphs, split/merged lines, ambiguity, URL/proxy validation, cache/refresh/path, cancellation, fallback and wrong-song rejection.');
+	console.log('External tests passed: parsers, preserved text, variant glyphs, split/merged lines, ambiguity, URL validation, cache/refresh/path, cancellation, fallback and wrong-song rejection.');
 })().catch(e => { console.error(e); process.exitCode = 1; });

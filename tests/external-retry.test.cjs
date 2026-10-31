@@ -6,7 +6,7 @@ const search = '<table><tr><td class="searchResult__title"><a href="/lyric/test/
 const song = '<h2 class="newLyricTitle__main">試験曲</h2><h3><a href="/artist/1">試験歌手</a></h3><div class="lyricBody"><div class="hiragana"><span class="ruby"><span class="rb">空</span><span class="rt">そら</span></span>を見る</div></div>';
 const metadata = async () => ({ title: '試験曲', artists: ['試験歌手'] });
 const off = { externalProvider: 'utaten', externalAutoRetry: 'off' }, on = { ...off, externalAutoRetry: 'failed' };
-const timeout = () => requestError({ curlCode: 28, error: 'curl error 28' });
+const timeout = () => requestError({ timeout: true });
 function fixture(request, retryDelays = [0, 0, 0]) {
 	const files = new Map(), states = [];
 	const client = create({ request, retryDelays, dataRoot: async () => 'C:/Test', parse: html => new JSDOM(html).window.document,
@@ -22,7 +22,7 @@ async function until(test) { for (let n = 0; n < 100; n++) { if (test()) return;
 	await a.client.load('1', metadata, off);
 	assert.equal(calls, 1, 'Off must still perform the initial attempt');
 	assert.equal(a.client.inspect().loading, false);
-	assert.match(a.client.inspect().error, /UtaTen：搜索页面：请求超时（curl error 28）/);
+	assert.match(a.client.inspect().error, /UtaTen：搜索页面：网络请求超时/);
 	// Empty HTTP 200 responses are service failures, not proof of no matching song.
 	calls = 0; const empty = fixture(async () => { calls++; return ' \n'; });
 	await empty.client.load('1', metadata, off);
@@ -47,25 +47,25 @@ async function until(test) { for (let n = 0; n < 100; n++) { if (test()) return;
 	const mixed = fixture(async url => { if (url.includes('utaten.com')) { permanentCalls++; throw requestError({ status: 403 }); } transientCalls++; throw timeout(); });
 	await mixed.client.load('1', metadata, { ...on, externalProvider: 'auto' });
 	assert.equal(permanentCalls, 1); assert.equal(transientCalls, 4);
-	assert.match(mixed.client.inspect().error, /UtaTen：.*HTTP 403/); assert.match(mixed.client.inspect().error, /歌ネット：.*curl error 28/);
+	assert.match(mixed.client.inspect().error, /UtaTen：.*HTTP 403/); assert.match(mixed.client.inspect().error, /歌ネット：.*网络请求超时/);
 	// A failed refresh keeps the old website cache but must still expose the failure.
 	let offline = false;
 	const retained = fixture(async url => { if (offline) throw timeout(); return url.includes('/search') ? search : song; });
 	await retained.client.load('1', metadata, off); const saved = [...retained.files.values()][0]; offline = true;
 	await retained.client.load('1', metadata, off, true);
 	assert(retained.client.inspect().ready); assert.equal(retained.client.inspect().source, 'utaten');
-	assert.match(retained.client.inspect().error, /curl error 28/); assert.match(retained.client.inspect().status, /已有网站缓存/);
+	assert.match(retained.client.inspect().error, /网络请求超时/); assert.match(retained.client.inspect().status, /已有网站缓存/);
 	assert.equal([...retained.files.values()][0], saved);
 	offline = false; await retained.client.load('1', metadata, off, true); assert.equal(retained.client.inspect().error, '');
 	// Local corrections remain usable and no longer suppress this playback's first request.
 	const local = fixture(async () => { throw timeout(); });
 	await local.client.ensureLocal('1', metadata, off);
 	await local.client.load('1', metadata, off); assert.equal(local.client.inspect().source, 'local');
-	assert.match(local.client.inspect().error, /curl error 28/); assert(local.client.inspect().ready);
+	assert.match(local.client.inspect().error, /网络请求超时/); assert(local.client.inspect().ready);
 	const fallback = () => [{ text: '空', rt: 'そら' }, { text: 'を見る' }];
 	const anchor = local.client.fallbackSegments('空を見る', fallback(), 'hiragana')[0].edit;
 	await local.client.saveEdit(anchor, 'うみ', null, fallback);
-	assert.match(local.client.inspect().error, /curl error 28/, 'Saving a correction must not hide a website failure');
+	assert.match(local.client.inspect().error, /网络请求超时/, 'Saving a correction must not hide a website failure');
 	let searches = 0, details = 0;
 	const b = fixture(async url => { if (url.includes('/search')) { searches++; return search; } if (++details < 3) throw timeout(); return song; });
 	await b.client.load('1', metadata, on);
@@ -76,9 +76,9 @@ async function until(test) { for (let n = 0; n < 100; n++) { if (test()) return;
 	const c = fixture(async () => { calls++; throw timeout(); });
 	await c.client.load('1', metadata, on); assert.equal(calls, 4, 'One initial request plus at most three retries');
 	assert.equal(c.client.inspect().waitingRetry, false);
-	for (const response of [{ status: 403 }, { status: 404 }, { curlCode: 60 }]) {
+	for (const response of [{ status: 403 }, { status: 404 }, { error: 'Permanent response failure' }]) {
 		calls = 0; const x = fixture(async () => { calls++; throw requestError(response); });
-		await x.client.load('1', metadata, on); assert.equal(calls, 1, 'Do not loop on refusal, missing pages or invalid certificates');
+		await x.client.load('1', metadata, on); assert.equal(calls, 1, 'Do not loop on refusal, missing pages or permanent response errors');
 	}
 	calls = 0; const missing = fixture(async () => { calls++; return '<html></html>'; });
 	await missing.client.load('1', metadata, on); assert.equal(calls, 2, 'Strict and title-only searches form one attempt; no match does not retry');
@@ -102,9 +102,9 @@ async function until(test) { for (let n = 0; n < 100; n++) { if (test()) return;
 	assert(!e.states.slice(e.states.lastIndexOf('读取外部歌词缓存…') + 1).some(s => s.includes('继续使用网易云')));
 	const rateLimit = requestError({ status: 429, retryAfter: '60' });
 	assert(rateLimit.retryable); assert.equal(rateLimit.retryAfterMs, 60000);
-	assert.match(requestError({ curlCode: 5 }).message, /代理地址/);
-	assert.match(requestError({ curlCode: 6 }).message, /网站域名/);
-	assert.match(requestError({ curlCode: 60 }).message, /证书/);
+	assert.match(requestError({ network: true }).message, /网络连接失败/);
+	assert(requestError({ network: true }).retryable);
+	assert(!requestError({ error: 'Permanent response failure' }).retryable);
 	calls = 0; const longWait = fixture(async () => { calls++; throw requestError({ status: 503, retryAfter: '600' }); });
 	await longWait.client.load('1', metadata, on); assert.equal(calls, 1, 'Do not shorten a server cooldown to fit the retry budget');
 	console.log('Retry tests passed: off/initial, workflow retries, bounded attempts, permanent failures, cancellation, policy changes, track isolation and Retry-After.');

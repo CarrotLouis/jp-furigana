@@ -9,7 +9,7 @@ const tick=()=>new Promise(r=>setTimeout(r,5));
 async function until(fn){for(let i=0;i<200;i++){if(fn())return;await tick();}throw Error('Review regression timed out');}
 function fixture(){
  const files=new Map(),calls=[],invalidations=[];let hold=true,release,removed=true,cancelled;
- const client=create({dataRoot:async()=>'C:/Test',parse:html=>new JSDOM(html).window.document,request:async(url,proxy,isCancelled)=>{
+ const client=create({dataRoot:async()=>'C:/Test',parse:html=>new JSDOM(html).window.document,request:async(url,isCancelled)=>{
   calls.push(url);cancelled=isCancelled;if(hold){hold=false;await new Promise(r=>release=r);}return url.includes('/search')?search:song;
  },fs:{mkdir:async()=>true,exists:async p=>files.has(p),readFileText:async p=>files.get(p),writeFileText:async(p,v)=>{files.set(p,v);return true;},remove:async p=>removed&&files.delete(p)},onInvalidated:id=>invalidations.push(id)});
  return{client,files,calls,invalidations,release:()=>release(),isCancelled:()=>cancelled(),failDelete:()=>removed=false};

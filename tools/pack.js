@@ -7,10 +7,7 @@
 // 除了 src/ 里的运行时文件，还会带上仓库根目录的 LICENSE / NOTICE.md /
 // LICENSE-kuromoji.txt —— 我们分发了 kuromoji 和 IPADIC，许可要求随附声明。
 //
-// 自己写 zip 而不是调 PowerShell：PS 5.1 读没有 BOM 的 .ps1 会按 ANSI 解，中文注释
-// 一乱语法就崩；而且 ZipFile::CreateFromDirectory 会把条目名写成 dict\x（反斜杠，
-// 不符合 ZIP 规范，解压端可能不建子目录）。Node 两个坑都没有，CI 里也不必用
-// Windows runner。
+// 使用 Node 标准库写 ZIP，条目统一使用正斜杠，兼容本地与跨平台 CI。
 
 'use strict';
 
@@ -36,8 +33,6 @@ const SRC_FILES = [
 	'editor.js',
 	'rnp-settings.js',
 	'source-dialog.js',
-	'external-fetch.ps1',
-	'cache-write.ps1',
 	'kuromoji.js',
 	'preview.jpg',
 	// kuromoji 和 IPADIC 的许可要求随附声明，所以这三个也得进包

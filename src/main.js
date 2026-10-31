@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFurigana.build）
-	const BUILD = 'upstream-1.6.3-web';
+	const BUILD = 'upstream-1.6.3-browser';
 	const REPO_URL = 'https://github.com/Leleawa/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -27,8 +27,6 @@
 		readingSource: 'romaji',
 		externalProvider: 'auto', // UtaTen first, then Uta-Net
 		externalAutoRetry: 'failed', // off | failed (at most three transient-error retries per load)
-		externalProxyEnabled: false,
-		externalProxy: '',
 		externalCacheDir: '', // default: <BetterNCM data>/lyrics/jp-furigana
 		rtSize: 60, // rt 相对底字的百分比
 		rtOpacity: 80, // rt 不透明度百分比
@@ -59,7 +57,7 @@
 	// ------------------------------------------------------------------ 配置
 
 	// 改了某项默认值就 +1，让已经存过设置的用户也跟上（见 loadConfig）
-	const CONFIG_VERSION = 3;
+	const CONFIG_VERSION = 4;
 
 	function loadConfig() {
 		let saved = {};
@@ -87,8 +85,9 @@
 			cfg.migrated = true;
 		}
 		// Retain the current configuration revision without bringing Plus-only settings.
-		if (!(saved.configVersion >= 3)) cfg.migrated = true;
+		if (!(saved.configVersion >= CONFIG_VERSION)) cfg.migrated = true;
 		for (const key of Object.keys(cfg)) if (key.startsWith('desktop')) { delete cfg[key]; cfg.migrated = true; }
+		for (const key of ['externalProxyEnabled','externalProxy']) if (Object.prototype.hasOwnProperty.call(cfg,key)) { delete cfg[key]; cfg.migrated = true; }
 		// 已经删掉的选项，别让旧配置里的残留值留着
 		delete cfg.useJapaneseFont;
 		delete cfg.font;
@@ -1808,12 +1807,11 @@
 			}
 		}
 	}
-	const NEEDS_RESCAN = ['kana', 'readingSource', 'externalProvider', 'externalProxyEnabled', 'externalProxy', 'externalCacheDir',
+	const NEEDS_RESCAN = ['kana', 'readingSource', 'externalProvider', 'externalCacheDir',
 		'karaoke', 'onlyFirstLine', 'skipCredits', 'skipNoKanaLines', 'requireLyricClass', 'customSelector'];
 	function setConfigValue(key, value) {
 		if (!Object.prototype.hasOwnProperty.call(DEFAULTS, key)) throw new Error('未知设置项');
-		if (!editPreparing && ['readingSource','externalProvider','externalCacheDir','externalProxy','externalProxyEnabled'].includes(key)) {editEntry++;state.editInterrupt=null;}
-		if (key === 'externalProxy') value = FuriganaExternal.validateProxy(value);
+		if (!editPreparing && ['readingSource','externalProvider','externalCacheDir'].includes(key)) {editEntry++;state.editInterrupt=null;}
 		if (key === 'rtSize' || key === 'rtOpacity') {
 			value = Number(value); if (!Number.isFinite(value)) throw new Error('请输入有效数值');
 			value = Math.max(20, Math.min(100, Math.round(value)));
@@ -2000,9 +1998,7 @@
 					<option value="failed">失败后自动重试（最多 3 次）</option>
 				</select></div>
 				<div class="fg-hint">超时等临时网络故障按 3 / 8 / 15 秒间隔重试获取流程；歌名与歌词核对属于同一次尝试。关闭后取消等待。没有匹配歌曲、网页格式错误或 HTTP 403 等情况不自动反复请求。</div>
-				<div class="fg-row"><label><input type="checkbox" data-k="externalProxyEnabled"> 使用代理获取外部歌词</label></div>
-				<div class="fg-row"><label>代理地址</label><input type="text" data-k="externalProxy" placeholder="http://127.0.0.1:7890" autocomplete="off" spellcheck="false"></div>
-				<div class="fg-hint">支持 HTTP / HTTPS / SOCKS5 / SOCKS5H；仅影响外部歌词网站，不改变网易云联网方式。不支持带账号密码的代理 URL。</div>
+				<div class="fg-hint">网站请求沿用浏览器当前网络环境；需要代理时可使用系统代理。本插件不修改网易云或系统网络配置。</div>
 				<div class="fg-row"><label>歌词缓存目录</label><input type="text" data-k="externalCacheDir" placeholder="留空：BetterNCM 数据目录 / lyrics / jp-furigana" spellcheck="false"></div>
 				<div class="fg-hint">可填写完整磁盘路径。每首歌曲一个 JSON 文件，包含网站歌词、读音和来源；更改目录后旧文件保留。</div>
 				<div class="fg-hint">“仅查询”限制外部网站来源；加载期间及未匹配的行仍沿用网易云音译 / 词典。网站命中的行采用网站读音，保留原歌词和时间轴。网站注音也可能有错。</div>

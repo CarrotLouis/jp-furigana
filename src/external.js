@@ -1,29 +1,16 @@
-/* Lazy website client, on-demand Windows transport and per-song JSON cache. */
+/* Lazy browser website client and verified BetterNCM filesystem persistence. */
 (function (root, factory) {
 	if (typeof module === 'object' && module.exports) module.exports = factory(require('./external-core.js'), require('./user-edits.js'));
 	else root.FuriganaExternal = factory(root.FuriganaExternalCore, root.FuriganaUserEdits);
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (core, edits) {
 	'use strict';
-	function validateProxy(value) {
-		const text = String(value || '').trim();
-		if (!text) return '';
-		let url;
-		try { url = new URL(text); } catch (_) { throw new Error('代理格式示例：http://127.0.0.1:7890'); }
-		if (!['http:', 'https:', 'socks5:', 'socks5h:'].includes(url.protocol) || !url.hostname ||
-			url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/') || /[\s\x00-\x1f]/.test(text)) {
-			throw new Error('仅支持 HTTP / HTTPS / SOCKS5 地址，不包含账号密码、路径或查询参数');
-		}
-		return text;
-	}
-	const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 	function requestError(result) {
-		const status = Number(result.status) || 0, code = Number(result.curlCode) || 0;
-		const causes = { 5: '无法解析代理地址', 6: '无法解析网站域名', 7: '无法连接网站或代理', 18: '网站响应未接收完整',
-			28: '请求超时', 35: 'TLS 连接失败', 60: '网站证书校验失败', 97: '代理连接失败' };
-		const message = code ? (causes[code] || '网络请求失败') + '（curl error ' + code + '）' :
-			status ? 'HTTP ' + status + (status === 403 ? '（网站拒绝访问）' : status === 429 ? '（网站请求限流）' : '') : String(result.error || '网络请求失败');
+		const status = Number(result.status) || 0;
+		const message = result.timeout ? '网络请求超时' : status ? 'HTTP ' + status +
+			(status === 403 ? '（网站拒绝访问）' : status === 429 ? '（网站请求限流）' : '') :
+			result.network ? '网络连接失败，请检查网络、系统代理或网站证书' : String(result.error || '网络请求失败');
 		const error = new Error(message);
-		error.retryable = [408, 425, 429, 500, 502, 503, 504].includes(status) || [5, 6, 7, 18, 28, 35, 52, 55, 56, 92, 97].includes(code);
+		error.retryable = !!result.timeout || !!result.network || [408, 425, 429, 500, 502, 503, 504].includes(status);
 		const after = String(result.retryAfter || '').trim();
 		error.retryAfterMs = /^\d+$/.test(after) ? Number(after) * 1000 : Math.max(0, (Date.parse(after) || 0) - Date.now());
 		return error;
@@ -43,99 +30,123 @@
 	function retryable(error) {
 		if (typeof error.retryable === 'boolean') return error.retryable;
 		return error.name === 'AbortError' || error instanceof TypeError && /fetch|network/i.test(error.message) ||
-			/HTTP (408|425|429|500|502|503|504)\b|curl error (5|6|7|18|28|35|52|55|56|92|97)\b/.test(error.message);
+			/HTTP (408|425|429|500|502|503|504)\b/.test(error.message);
 	}
 	function browserTransport(bn, plugin, options = {}) {
-		let scriptPromise, rootPromise;
-		let chain = Promise.resolve();
-		const toBase64 = value => {
-			const bytes = new TextEncoder().encode(value);
-			let binary = ''; for (const b of bytes) binary += String.fromCharCode(b);
-			return btoa(binary);
-		};
-		const command64 = value => {
-			let binary = '';
-			for (let i = 0; i < value.length; i++) { const c = value.charCodeAt(i); binary += String.fromCharCode(c & 255, c >> 8); }
-			return btoa(binary);
-		};
+		let rootPromise, requests = Promise.resolve();
 		const dataRoot = () => rootPromise || (rootPromise = bn.app.getDataPath().then(p => p.replace(/\\/g, '/')));
-		async function request(url, proxy, cancelled = () => false) {
+		const limit = 2 * 1024 * 1024;
+		async function request(url, cancelled = () => false) {
 			if (!core.allowedURL(url)) throw new Error('只允许访问歌词网站');
-			proxy = validateProxy(proxy);
 			const job = async () => {
-				if (cancelled()) throw new Error('已取消');
-				const dir = (await dataRoot()) + '/lyrics/jp-furigana/requests';
-				if (!await bn.fs.mkdir(dir)) throw new Error('无法创建请求目录');
-				if (!scriptPromise) scriptPromise = bn.fs.readFileText(plugin.pluginPath + '/external-fetch.ps1').catch(e => { scriptPromise = null; throw e; });
-				const script = await scriptPromise;
-				const bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
-				const id = [...bytes].map(n => n.toString(16).padStart(2, '0')).join('');
-				const reply = dir + '/request-' + id + '.json';
-				const encoded = toBase64(JSON.stringify({ url, proxy, reply }));
-				const command = 'powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + command64('& {\n' + script + '\n} ' + encoded);
-				if (command.length > 30000) throw new Error('网络脚本超出 Windows 命令长度限制');
-				const deadline = Date.now() + 45000;
-				let cancellationSent = false;
+				const controller = new AbortController(), signal = controller.signal;
+				let timedOut = false, frame, reader, complete = false;
+				const abortError = () => {
+					const error = timedOut ? requestError({timeout:true}) : new Error('已取消');
+					if (!timedOut) error.retryable = false;
+					return error;
+				};
+				const guarded = promise => new Promise((resolve, reject) => {
+					if (signal.aborted) { Promise.resolve(promise).catch(()=>{}); reject(abortError()); return; }
+					const abort = () => reject(abortError());
+					signal.addEventListener('abort', abort, {once:true});
+					Promise.resolve(promise).then(resolve,reject).finally(() => signal.removeEventListener('abort',abort));
+				});
+				const timeout = setTimeout(() => {timedOut=true;controller.abort();}, options.requestTimeoutMs || 30000);
+				const cancellation = setInterval(() => {if(cancelled())controller.abort();}, options.cancelPollMs || 100);
 				try {
-					if (cancelled()) throw new Error('已取消');
-					if (!await bn.app.exec(command, false, false)) throw new Error('无法启动系统网络组件');
-					while (Date.now() < deadline) {
-						if (cancelled() && !cancellationSent) {
-							cancellationSent = true;
-							try { await storage.writeFileText(reply + '.cancel', '1'); } catch (_) { /* bounded helper timeout still applies */ }
-						}
-						if (await bn.fs.exists(reply)) {
-							const raw = await bn.fs.readFileText(reply);
-							if (cancelled()) throw new Error('已取消');
-							if (raw.length > 3000000) throw new Error('网站响应过大');
-							const result = JSON.parse(raw);
-							if (!result.ok) throw requestError(result);
-							if (typeof result.body !== 'string' || !core.allowedURL(result.url)) throw new Error('无效的网站响应');
-							return validateBody(result.body);
-						}
-						await sleep(350);
+					if (cancelled()) throw abortError();
+					let perform = options.fetch || ((...args) => globalThis.fetch(...args));
+					const init = {credentials:'omit',cache:'no-store',redirect:'manual',signal,referrerPolicy:'no-referrer'};
+					if (new URL(url).hostname.endsWith('utaten.com')) {
+						// UtaTen requires a site Referer. An inert, sandboxed text page
+						// supplies a normal browser request context; no remote scripts run.
+						const doc = options.document || globalThis.document;
+						frame = doc.createElement('iframe');
+						frame.setAttribute('sandbox','allow-same-origin');frame.setAttribute('aria-hidden','true');
+						frame.referrerPolicy='no-referrer';frame.style.display='none';
+						const loaded = new Promise((resolve,reject) => {frame.onload=resolve;frame.onerror=()=>reject(requestError({network:true}));});
+						frame.src='https://utaten.com/robots.txt';(doc.body || doc.documentElement).append(frame);
+						await guarded(loaded);
+						if (frame.contentWindow.location.origin !== 'https://utaten.com') throw new Error('UtaTen 来源页未正确加载');
+						perform = frame.contentWindow.fetch.bind(frame.contentWindow);
+						init.referrer='https://utaten.com/';init.referrerPolicy='origin';
 					}
-					throw new Error('网络请求超时（系统组件可能被拦截）');
+					let response, target=url;
+					for(let redirects=0;redirects<=2;redirects++) {
+						if(signal.aborted || cancelled())throw abortError();
+						response=await guarded(perform(target,init));
+						if(response.type==='opaqueredirect')throw new Error('浏览器无法核对歌词页重定向，请查看来源网页');
+						if(response.url && !core.allowedURL(response.url))throw new Error('网站跳转超出允许范围');
+						if(![301,302,303,307,308].includes(response.status))break;
+						const location=response.headers.get('location');
+						if(!location || redirects===2)throw new Error('网站重定向过多或缺少目标');
+						target=new URL(location,target).href;
+						if(!core.allowedURL(target))throw new Error('网站跳转超出允许范围');
+					}
+					if(!response.ok)throw requestError({status:response.status,retryAfter:response.headers.get('retry-after')});
+					if(Number(response.headers.get('content-length'))>limit)throw new Error('网站响应过大');
+					let body;
+					if(response.body && typeof response.body.getReader==='function') {
+						reader=response.body.getReader();const decoder=new TextDecoder(),parts=[];let bytes=0;
+						while(true){
+							const item=await guarded(reader.read());if(item.done){complete=true;break;}
+							bytes+=item.value.byteLength;if(bytes>limit)throw new Error('网站响应过大');
+							parts.push(decoder.decode(item.value,{stream:true}));
+						}
+						body=parts.join('')+decoder.decode();
+					}else{
+						body=await guarded(response.text());
+						if(new TextEncoder().encode(body).byteLength>limit)throw new Error('网站响应过大');
+					}
+					if(signal.aborted || cancelled())throw abortError();
+					return validateBody(body);
+				} catch(error) {
+					if(signal.aborted)throw abortError();
+					if(error instanceof TypeError || error.name==='TypeError')throw requestError({network:true});
+					throw error;
 				} finally {
-					// Only this request's exact filenames, never a directory or wildcard.
-					for (const path of [reply, reply + '.partial', reply + '.cancel']) {
-						try { if (await bn.fs.exists(path)) await bn.fs.remove(path); } catch (_) { /* next request remains usable */ }
-					}
+					clearTimeout(timeout);clearInterval(cancellation);controller.abort();
+					if(reader && !complete)try{Promise.resolve(reader.cancel()).catch(()=>{});}catch(_){}
+					if(frame){frame.onload=frame.onerror=null;frame.remove();}
 				}
 			};
-			// One child process at a time, including rapidly skipped tracks.
-			const result = chain.then(job, job);
-			chain = result.catch(() => {});
-			return result;
+			const result=requests.then(job,job);requests=result.catch(()=>{});return result;
 		}
 		// BetterNCM 1.3.4's binary write route uses wide Windows paths; its text
 		// route uses a narrow std::string, which can fail for Chinese folder names.
 		const storage = { ...bn.fs, writeFileText: (path, text) =>
 			bn.fs.writeFile(path, new Blob([text], { type: 'application/json;charset=utf-8' })) };
-		storage.atomicWrite = async (path, next, expected) => {
-			const bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
-			const job = path + '.write-' + [...bytes].map(n => n.toString(16).padStart(2, '0')).join('');
-			const script = await bn.fs.readFileText(plugin.pluginPath + '/cache-write.ps1');
-			if (!await storage.writeFileText(job, JSON.stringify({ next, expected }))) throw new Error('无法写入临时保存文件');
-			const command = 'powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + command64('& {\n' + script + '\n} ' + toBase64(job));
-			let launched = false, finished = false;
-			try {
-				launched = !!await bn.app.exec(command, false, false);
-				if (!launched) throw new Error('无法启动本地保存组件');
-				const deadline = Date.now() + 15000;
-				while (Date.now() < deadline) {
-					if (await bn.fs.exists(job + '.result')) {
-						const result = JSON.parse(await bn.fs.readFileText(job + '.result')); finished = true;
-						if (!result.ok) throw new Error(result.error);
-						return true;
-					}
-					await sleep(100);
-				}
-				throw new Error('保存组件响应超时，请重新读取确认；输入内容仍保留');
-			} finally {
-				// Do not remove the input of a helper whose completion is still unknown.
-				if (!launched || finished) for (const p of [job, job + '.result']) try { if (await bn.fs.exists(p)) await bn.fs.remove(p); } catch (_) {}
+		// The JS filesystem wrapper omits rename in BetterNCM 1.3.4, but its
+		// authenticated filesystem API provides it. Use that API, never a process.
+		async function replaceFile(from, to) {
+			if (typeof bn.fs.rename === 'function') {
+				if (await bn.fs.rename(from, to) === false) throw new Error('本地文件替换失败');
+			} else {
+				if (typeof bn.betterncmFetch !== 'function') throw new Error('当前 BetterNCM 缺少文件替换接口，请更新 BetterNCM');
+				const response = await bn.betterncmFetch('/fs/rename?path=' + encodeURIComponent(from) + '&dest=' + encodeURIComponent(to));
+				if (!response.ok || (await response.text()).trim() !== 'ok') throw new Error('本地文件替换失败');
 			}
+		}
+		let saves = Promise.resolve();
+		storage.atomicWrite = (path, next, expected) => {
+			const save = async () => {
+				if (typeof next !== 'string' || next.length > 2000000) throw new Error('无效的缓存内容');
+				JSON.parse(next);
+				const bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
+				const temporary = path + '.tmp-' + [...bytes].map(n => n.toString(16).padStart(2, '0')).join('');
+				try {
+					if (!await storage.writeFileText(temporary, next) || await bn.fs.readFileText(temporary) !== next) throw new Error('临时保存校验失败，原文件未修改');
+					const previous = await bn.fs.exists(path) ? await bn.fs.readFileText(path) : null;
+					if (previous !== expected) throw new Error('缓存已变化，请重新读取后保存');
+					await replaceFile(temporary, path);
+					if (await bn.fs.readFileText(path) !== next) throw new Error('保存后校验失败，请重新读取；输入内容仍保留');
+					return true;
+				} finally {
+					try { if (await bn.fs.exists(temporary)) await bn.fs.remove(temporary); } catch (_) { /* never remove the original */ }
+				}
+			};
+			const result = saves.then(save, save); saves = result.catch(() => {}); return result;
 		};
 		return { request, dataRoot, fs: storage, parse: html => new DOMParser().parseFromString(html, 'text/html'), ...options };
 	}
@@ -272,14 +283,12 @@
 				const track = manualUrl?null:await attempt(metadata, '获取歌曲信息');
 				if (!alive(g)) return;
 				if (!manualUrl&&(!track || !track.title || !Array.isArray(track.artists) || !track.artists.some(Boolean))) throw new Error('无法确定歌名与歌手，请稍后重试');
-				const proxy = settings.externalProxyEnabled ? validateProxy(settings.externalProxy) : '';
-				if (settings.externalProxyEnabled && !proxy) throw new Error('请填写代理地址或关闭代理');
 				const providers = settings.externalProvider === 'utaten' ? ['utaten'] : settings.externalProvider === 'utanet' ? ['utanet'] : ['utaten', 'utanet'];
 				const failures = new Map();
 				let evidence;
 				async function findProvider(provider) {
 					const fetchDoc = async (url, stage) => {
-						try { return deps.parse(validateBody(await deps.request(url, proxy, () => !alive(g)))); }
+						try { return deps.parse(validateBody(await deps.request(url, () => !alive(g)))); }
 						catch (error) { const contextual = new Error(stage + '：' + errorText(error)); contextual.retryable = retryable(error); contextual.retryAfterMs = error.retryAfterMs; throw contextual; }
 					};
 					let candidates = [], searched = false;
@@ -320,7 +329,7 @@
 				const data = await attempt(async () => {
 					if(manualUrl){
 						announce('正在获取手动指定的 UtaTen 歌词页…');
-						const doc=deps.parse(validateBody(await deps.request(manualUrl,proxy,()=>!alive(g))));
+						const doc=deps.parse(validateBody(await deps.request(manualUrl,()=>!alive(g))));
 						const result=core.parseUtaten(doc,manualUrl);
 						if(!core.validRecord({schema:1,songId:id,...result},id))throw new Error('UtaTen 歌词页格式校验失败');
 						return result;
@@ -454,5 +463,5 @@
 		}
 		return { load, setSource, stop, cancelFetch, setAutoRetry, segments, fallbackSegments, ensureLocal, saveEdit, list, manage, directory, inspect: () => ({ requestId:generation, songId: currentId, status, error: lastError, warning, cachePath, source, loading, waitingRetry: !!cancelWait, url: source === 'local' ? '' : current && current.url, manualUrl:current&&current.manualSource&&current.manualSource.url||'', ready: !!current, title: current && current.title, artists: current && current.artists, edits: current ? edits.items(current).length : 0, settings: lastSettings }) };
 	}
-	return { create, browserTransport, validateProxy, requestError };
+	return { create, browserTransport, requestError };
 });

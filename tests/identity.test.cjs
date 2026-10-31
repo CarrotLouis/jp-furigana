@@ -5,7 +5,7 @@ const src = path.resolve(__dirname, '../src'), manifest = require('../src/manife
 async function fixture(existing, desktopChoice) {
 	const dom = new JSDOM('<body><p id="original">原页面</p></body>', { url:'https://music.163.com/',runScripts:'outside-only',pretendToBeVisual:true });
 	const win=dom.window, handlers={}, opened=[];
-	const plusSettings=JSON.stringify({ enabled:false,readingSource:'dict',rtSize:74,configVersion:2,...(desktopChoice===undefined?{}:{desktopEnabled:desktopChoice}) });
+	const plusSettings=JSON.stringify({ enabled:false,readingSource:'dict',rtSize:74,configVersion:2,externalProxyEnabled:true,externalProxy:'http://127.0.0.1:9',...(desktopChoice===undefined?{}:{desktopEnabled:desktopChoice}) });
 	const upstreamSettings=JSON.stringify({enabled:false,readingSource:'romaji',rtSize:66,configVersion:3,desktopEnabled:false});
 	const plusCore={},plusDictionary={},plusLoader=()=>{};
 	win.FuriganaPlusCore=plusCore;win.kuromojiFuriganaPlus=plusDictionary;win.__FURIGANA_PLUS_DICT_LOADER__=plusLoader;
@@ -22,7 +22,8 @@ async function fixture(existing, desktopChoice) {
 	assert.equal(win.FuriganaPlusCore,plusCore);assert.equal(win.kuromojiFuriganaPlus,plusDictionary);assert.equal(win.__FURIGANA_PLUS_DICT_LOADER__,plusLoader);
 	assert.equal(win.JPFurigana.config.rtSize,existing?66:74,'Existing upstream preferences take priority; copy Plus only when absent');
 	assert(!Object.keys(win.JPFurigana.config).some(key=>key.startsWith('desktop')),'Legacy Plus-only desktop preferences are removed from upstream configuration');
-	assert.equal(win.JPFurigana.config.configVersion,3);
+	assert.equal(win.JPFurigana.config.configVersion,4);
+	assert(!('externalProxy' in win.JPFurigana.config));assert(!('externalProxyEnabled' in win.JPFurigana.config));
 	win.JPFurigana.set('rtSize',81);assert.equal(JSON.parse(win.localStorage.getItem('jp-furigana.config')).rtSize,81);
 	assert.equal(win.localStorage.getItem('jp-furigana-plus.config'),plusSettings);assert.equal(win.localStorage.getItem('jp-furigana-plus.cache.v4'),'keep-plus-cache');
 	const panel=handlers.config();panel.querySelector('[data-open]').click();assert.equal(opened[0],'https://github.com/Leleawa/jp-furigana');

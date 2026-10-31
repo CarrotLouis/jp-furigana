@@ -41,7 +41,7 @@ win.FuriganaExternal.browserTransport = () => ({
 	parse: html => new win.DOMParser().parseFromString(html, 'text/html'),
 	request: async url => {
 		requests++;
-		if (failure === 'timeout') throw win.FuriganaExternal.requestError({ curlCode: 28 });
+		if (failure === 'timeout') throw win.FuriganaExternal.requestError({ timeout: true });
 		if (failure === 'empty') return '';
 		assert.equal(new URL(url).hostname, 'utaten.com', 'UtaTen-only must never request Uta-Net');
 		if (url.includes('/search')) return '<table><tr><td class="searchResult__title"><a href="/lyric/test001/">星の手紙</a></td><td class="searchResult__artist"><p><a>試験歌手</a></p></td></tr></table>';
@@ -112,10 +112,9 @@ const assertScreenshot = (mode = 'hiragana') => {
 	assert.equal(JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).manualSource.url, 'https://utaten.com/lyric/test001/');
 	assert.equal(requests, beforeManual + 1, 'Manual selection requests the detail page directly');
 	assert(readings().includes('あなた'));
-	const proxy = panel.querySelector('[data-k="externalProxy"]');
-	proxy.value = 'http://user:password@127.0.0.1:7890'; proxy.dispatchEvent(new win.Event('change'));
-	assert(panel.querySelector('.fg-external-error').textContent.includes('账号密码'));
-	assert.equal(win.JPFurigana.config.externalProxy, '');
+	assert(!panel.querySelector('[data-k="externalProxy"]'));
+	assert(!panel.querySelector('[data-k="externalProxyEnabled"]'));
+	assert.throws(()=>win.JPFurigana.set('externalProxy','http://127.0.0.1:9'),/未知设置项/);
 	// The RNP menu is mounted later than plugin initialization, as in the real client.
 	const rnpMenu = win.document.createElement('div'); rnpMenu.className = 'rnp-settings-menu';
 	rnpMenu.innerHTML = '<div class="rnp-settings-menu-tabs"><div class="rnp-settings-menu-tab" data-tab="lyric">歌词</div><div class="rnp-settings-menu-tab" data-tab="font">字体</div></div><div class="rnp-settings-menu-inner"><div class="rnp-group" data-tab="lyric"></div><div class="rnp-group" data-tab="font"></div></div>';
@@ -198,9 +197,9 @@ const assertScreenshot = (mode = 'hiragana') => {
 	// Both settings surfaces must expose the actual failure, even with local edits ready.
 	panel.querySelector('[data-a="editMode"]').click();
 	failure = 'timeout'; panel.querySelector('[data-a="externalRetry"]').click();
-	await until(() => !win.JPFurigana.externalStatus().loading && win.JPFurigana.externalStatus().error.includes('curl error 28'));
+	await until(() => !win.JPFurigana.externalStatus().loading && win.JPFurigana.externalStatus().error.includes('网络请求超时'));
 	for (const message of [panel.querySelector('.fg-external-status'), rnpMenu.querySelector('[data-status]')]) {
-		assert.match(message.textContent, /UtaTen：搜索页面：请求超时（curl error 28）/);
+		assert.match(message.textContent, /UtaTen：搜索页面：网络请求超时/);
 		assert(!message.textContent.includes('暂未获取'));
 	}
 	assert.equal(win.JPFurigana.externalStatus().source, 'local');
