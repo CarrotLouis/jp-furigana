@@ -1,7 +1,7 @@
 /* External lyric parsing and conservative alignment. No network or persistent state. */
 (function (root, factory) {
 	if (typeof module === 'object' && module.exports) module.exports = factory(require('./furigana.js'));
-	else root.FuriganaExternalCore = factory(root.FuriganaCore);
+	else root.FuriganaPlusExternalCore = factory(root.FuriganaPlusCore);
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
 	'use strict';
 	const VARIANTS = core.LOOKUP_VARIANTS;

@@ -8,6 +8,7 @@ LICENSE 里的 MIT 覆盖本插件自行编写的 JavaScript、PowerShell、C# �
 - 版本：0.1.2　许可：Apache License 2.0（全文见 LICENSE-kuromoji.txt）
 - 上游：https://github.com/takuyaa/kuromoji.js
 - 本仓库中的 kuromoji.js **经过修改**，改动内容和复现方式见 tools/patch-kuromoji.js。
+  独立版另为导出对象和词典读取钩子使用专属全局标识，避免覆盖原版。
 
 ## IPADIC 词典（dict/*.dat.gz）
 

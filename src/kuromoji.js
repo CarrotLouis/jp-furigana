@@ -4,12 +4,12 @@
  *
  * NOTICE: This file has been MODIFIED from the upstream release by the
  * jp-furigana BetterNCM plugin. Changes (see tools/patch-kuromoji.js):
- *   1. UMD header always assigns to window.kuromoji.
+ *   1. UMD header always assigns to window.kuromojiFuriganaPlus.
  *   2. Dictionary paths are joined by plain concatenation instead of path.join.
- *   3. Added a globalThis.__FURIGANA_DICT_LOADER__ hook to loadArrayBuffer.
+ *   3. Added a globalThis.__FURIGANA_PLUS_DICT_LOADER__ hook to loadArrayBuffer.
  * See also NOTICE.md for the bundled IPADIC dictionary license.
  */
-(function(f){var m=f();var g=(typeof window!=="undefined")?window:(typeof globalThis!=="undefined"?globalThis:this);g.kuromoji=m;if(typeof module==="object"&&module&&module.exports)module.exports=m;})(function(){var define,module,exports;function __fgJoin(a,b){return String(a).replace(/\/+$/,"")+"/"+b;}return (function(){function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s}return e})()({1:[function(require,module,exports){
+(function(f){var m=f();var g=(typeof window!=="undefined")?window:(typeof globalThis!=="undefined"?globalThis:this);g.kuromojiFuriganaPlus=m;if(typeof module==="object"&&module&&module.exports)module.exports=m;})(function(){var define,module,exports;function __fgJoin(a,b){return String(a).replace(/\/+$/,"")+"/"+b;}return (function(){function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s}return e})()({1:[function(require,module,exports){
 (function (process,global){
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
@@ -8125,7 +8125,7 @@ BrowserDictionaryLoader.prototype = Object.create(DictionaryLoader.prototype);
  * @param {BrowserDictionaryLoader~onLoad} callback Callback function
  */
 BrowserDictionaryLoader.prototype.loadArrayBuffer = function (url, callback) {
-    var custom = (typeof globalThis !== "undefined") && globalThis.__FURIGANA_DICT_LOADER__;
+    var custom = (typeof globalThis !== "undefined") && globalThis.__FURIGANA_PLUS_DICT_LOADER__;
     if (custom) {
         Promise.resolve(custom(url)).then(function (ab) {
             try {

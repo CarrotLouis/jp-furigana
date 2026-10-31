@@ -2,7 +2,7 @@
 
 ## 使用
 
-1. 安装 [BetterNCM 1.3.4](https://github.com/std-microblock/chromatic/releases/tag/1.3.4)，将 `jp-furigana.plugin` 放到实际 BetterNCM 数据目录下的 `plugins/`。更新时先退出网易云，备份并移出旧包；若从 Plus 迁移，也先移出 Plus 包。
+1. 安装 [BetterNCM 1.3.4](https://github.com/std-microblock/chromatic/releases/tag/1.3.4)，将 `jp-furigana-plus.plugin` 放到实际 BetterNCM 数据目录下的 `plugins/`。更新时先退出网易云，备份并移出旧包；原版与 Plus 只启用一个。
 2. 重启网易云，进入插件设置，将「读音来源」选为「外部网站」。原有默认设置仍为网易云音译。
 3. 播放日语歌并打开歌词页。显示顺序为：网易云音译 / 离线词典 → 外部网站成功匹配的读音。原文字形、翻译和时间轴不替换。
 4. RNP 设置简要显示匹配到的歌名、歌手、来源与人工修改数量；原插件设置页保留详细诊断。「查看来源网页」在系统浏览器打开来源；「重新获取当前歌曲」忽略缓存并重新搜索。

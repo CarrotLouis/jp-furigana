@@ -19,7 +19,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
-namespace FuriganaDesktop {
+namespace FuriganaPlusDesktop {
     static class Data {
         [ThreadStatic] static JavaScriptSerializer json;
         public static JavaScriptSerializer Json { get { return json ?? (json = new JavaScriptSerializer { MaxJsonLength = 524288, RecursionLimit = 24 }); } }
@@ -172,7 +172,7 @@ namespace FuriganaDesktop {
         public const double HideDelayMilliseconds=2000;
         public bool Locked { get { return locked; } }
         public LyricsWindow(Action<string,object> send) {
-            action=send;Title="日语歌词振假名 · 桌面歌词";WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;
+            action=send;Title="日语歌词振假名 Plus · 桌面歌词";WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;
             ShowInTaskbar=false;ShowActivated=false;Topmost=true;ResizeMode=ResizeMode.CanResize;SizeToContent=SizeToContent.Height;Template=FramelessTemplate();
             Width=900;MinWidth=240;MaxWidth=SystemParameters.VirtualScreenWidth;MinHeight=60;
             var grid=new Grid {Margin=new Thickness(8,0,8,8),Background=Brushes.Transparent};grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto,MinHeight=32});grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});

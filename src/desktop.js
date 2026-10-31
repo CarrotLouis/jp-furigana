@@ -2,7 +2,7 @@
  * visible; readings, the native playback clock and source caches stay here. */
 (function(root,factory){
 	if(typeof module==='object'&&module.exports)module.exports=factory();
-	else root.FuriganaDesktop=factory();
+	else root.FuriganaPlusDesktop=factory();
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
 	'use strict';
 	const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));

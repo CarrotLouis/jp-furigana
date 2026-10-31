@@ -1,7 +1,7 @@
 /* Small on-demand URL dialog. It never performs network requests or writes files. */
 (function(root,factory){
 	if(typeof module==='object'&&module.exports)module.exports=factory();
-	else root.FuriganaSourceDialog=factory();
+	else root.FuriganaPlusSourceDialog=factory();
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
 	'use strict';
 	const active=new WeakMap();let next=0;

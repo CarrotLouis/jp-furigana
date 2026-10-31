@@ -1,0 +1,61 @@
+name: Native release
+on:
+  push:
+    branches: ['release/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: furigana-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Compile the native renderer from public source
+        shell: powershell
+        run: |
+          Remove-Item -LiteralPath src/desktop-host.exe -Force
+          ./tools/build-desktop-host.ps1 -Check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: npm test
+      - name: RNP and LyricBar compatibility
+        run: |
+          node tools/test-rnp-dom.js slide noruby
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/test-rnp-dom.js lyricbar
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: node tests/cache-write.test.cjs
+      - run: node tests/desktop-native.test.cjs
+      - run: node tools/check-store.cjs
+      - run: node tools/pack.js
+      - name: Publish the verified source and compiled renderer
+        id: promote
+        run: node tools/promote-release.cjs
+      - name: Package the exact published tree
+        run: node tools/package-release.cjs ${{ steps.promote.outputs.commit }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jp-furigana-plus-release
+          overwrite: true
+          path: |
+            builds/jp-furigana-plus-*.plugin
+            builds/release-info.json
+            builds/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await require('./tools/publish-release.cjs')({github, context, core});

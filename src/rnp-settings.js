@@ -1,24 +1,24 @@
 /* Optional DOM adapter for RefinedNowPlayingNext 3.0.2. No RNP files or internals are patched. */
 (function (root, factory) {
 	if (typeof module === 'object' && module.exports) module.exports = factory();
-	else root.FuriganaRnpSettings = factory();
+	else root.FuriganaPlusRnpSettings = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
 	'use strict';
-	const TAB = 'jp-furigana';
+	const TAB = 'jp-furigana-plus';
 	function install(api, doc = document) {
 		const win = doc.defaultView, bindings = new Map();
 		let nextId = 0, stopped = false;
 		const style = doc.createElement('style');
 		style.textContent = `
-			.rnp-group[data-tab="jp-furigana"] .fg-rnp-note { padding:0; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.5; opacity:.65; margin:0 0 20px; }
-			.rnp-group[data-tab="jp-furigana"] .rnp-select-group-btn { white-space:normal; }
-			.rnp-group[data-tab="jp-furigana"] .fg-rnp-actions { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 20px; }
-			.rnp-group[data-tab="jp-furigana"] .fg-rnp-actions button { flex:1 1 120px; min-width:0; border-radius:6px; padding:6px; }
-			.rnp-group[data-tab="jp-furigana"] button:disabled { opacity:.35; cursor:default; }
-			.rnp-group[data-tab="jp-furigana"] [hidden] { display:none !important; }
-			.rnp-group[data-tab="jp-furigana"] .fg-rnp-subtitle { font-size:18px; opacity:.6; margin:20px 0; }
-			.rnp-group[data-tab="jp-furigana"] [data-error] { color:#ffb4ab; }
-			.rnp-group[data-tab="jp-furigana"] .fg-edit-interrupt {color:#ef7777 !important;line-height:1.5;}
+			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-note { padding:0; white-space:pre-wrap; overflow-wrap:anywhere; font-size:13px; line-height:1.5; opacity:.65; margin:0 0 20px; }
+			.rnp-group[data-tab="jp-furigana-plus"] .rnp-select-group-btn { white-space:normal; }
+			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-actions { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 20px; }
+			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-actions button { flex:1 1 120px; min-width:0; border-radius:6px; padding:6px; }
+			.rnp-group[data-tab="jp-furigana-plus"] button:disabled { opacity:.35; cursor:default; }
+			.rnp-group[data-tab="jp-furigana-plus"] [hidden] { display:none !important; }
+			.rnp-group[data-tab="jp-furigana-plus"] .fg-rnp-subtitle { font-size:18px; opacity:.6; margin:20px 0; }
+			.rnp-group[data-tab="jp-furigana-plus"] [data-error] { color:#ffb4ab; }
+			.rnp-group[data-tab="jp-furigana-plus"] .fg-edit-interrupt {color:#ef7777 !important;line-height:1.5;}
 		`;
 		doc.head.append(style);
 		function mount(menu) {

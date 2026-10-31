@@ -1,26 +1,17 @@
 // Distribution checks shared by local development and CI. No network or writes.
 'use strict';
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), {createHash}=require('node:crypto');
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..'), src = path.join(root, 'src');
 const m = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 assert.equal(lock.version,pkg.version,'Lockfile version must match package.json');assert.equal(lock.packages[''].version,pkg.version,'Lockfile root metadata must match package.json');
 for (const key of ['name','slug','version','author','author_link','description','preview','betterncm_version']) assert(m[key], 'Missing ' + key);
-assert.equal(m.slug, 'jp-furigana'); assert(!m.fork_of); assert.equal(m.version, pkg.version);
-assert.equal(m.author,'leleawa');assert.equal(m.author_link,'https://github.com/Leleawa/jp-furigana');
-assert.deepEqual(m.requirements, [], 'RNP remains an optional adapter');
+assert.equal(m.slug, 'jp-furigana-plus'); assert.equal(m.fork_of, 'jp-furigana'); assert.equal(m.version, pkg.version);
+assert.deepEqual(m.requirements, ['RefinedNowPlayingNext']); assert.equal(m['ncm-version-req'], '> 3.1.11');
 assert.equal(m.require_restart, true); assert(!m.native_plugin, 'No in-process native DLL');
 assert(fs.existsSync(path.join(root,'native/DesktopLyricsHost.cs')), 'Desktop helper source must accompany its binary');
 assert.equal(fs.readFileSync(path.join(src,'desktop-host.exe')).subarray(0,2).toString(),'MZ','Desktop renderer must be a Windows executable');
-const provenancePath=path.join(root,'native-build-info.json');
-if(fs.existsSync(provenancePath)){
-	const info=JSON.parse(fs.readFileSync(provenancePath,'utf8'));
-	const hash=(name,text=false)=>{const bytes=fs.readFileSync(path.join(root,name));return createHash('sha256').update(text?bytes.toString('utf8').replace(/\r\n/g,'\n'):bytes).digest('hex');};
-	assert.equal(hash('native/DesktopLyricsHost.cs',true),info.nativeSourceSha256,'Native source changed; update its Actions build provenance');
-	assert.equal(hash('tools/build-desktop-host.ps1',true),info.nativeBuildScriptSha256);
-	assert.equal(hash('src/desktop-host.exe'),info.nativeExecutableSha256,'Shipped native binary must match the recorded Actions artifact');
-}
 assert(/^[a-zA-Z0-9_-]+$/.test(m.slug)); assert(/^\d+\.\d+\.\d+$/.test(m.version));
 assert(!['force-install','force-update','force-uninstall'].some(k => m[k]), 'No forced market actions');
 const image = fs.statSync(path.join(src, m.preview)); assert(image.size <= 200 * 1024, 'Preview must stay small');
@@ -32,6 +23,4 @@ for (const p of ['README.md','docs/external-lyrics.md','docs/distribution.md']) 
 }
 const main = fs.readFileSync(path.join(src,'main.js'),'utf8');
 assert(main.includes('betterncm.ncm.openUrl')); assert(main.includes('反馈问题')); assert(main.includes('源码仓库'));
-assert(main.includes("const REPO_URL = 'https://github.com/Leleawa/jp-furigana'"));
-assert(main.includes('window.JPFurigana ='));assert(!main.includes('tree/standalone'));
-console.log('Store checks passed: upstream identity, optional adapters, version, restart, small preview, license copies, native source, support links and documentation.');
+console.log('Store checks passed: independent identity, fork attribution, version, restart, small preview, license copies, scripts, support links and documentation.');

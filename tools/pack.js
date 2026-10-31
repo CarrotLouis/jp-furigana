@@ -1,4 +1,4 @@
-// 把 src/ 打包成 builds/jp-furigana.plugin（.plugin 就是个 zip，文件放在 zip 根目录）。
+// 把 src/ 打包成 builds/jp-furigana-plus.plugin（.plugin 就是个 zip，文件放在 zip 根目录）。
 //
 //   node tools/pack.js
 //   node tools/pack.js --install            复制到 C:\betterncm\plugins
@@ -21,7 +21,7 @@ const zlib = require('zlib');
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const OUT_DIR = path.join(ROOT, 'builds');
-const OUT = path.join(OUT_DIR, 'jp-furigana.plugin');
+const OUT = path.join(OUT_DIR, 'jp-furigana-plus.plugin');
 
 // 全部取自 src/，和 BetterNCM 商店的取法一致（商店按 subpath=/src 直接打包这个目录），
 // 运行源码来自同一目录。商店会将预览图单独发布，本地包保留该图。

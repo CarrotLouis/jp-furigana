@@ -1,7 +1,7 @@
 /* Delegated editing layer: never insert inputs into RNP's moving React lyric tree. */
 (function (root, factory) {
 	if (typeof module === 'object' && module.exports) module.exports = factory();
-	else root.FuriganaEditor = factory();
+	else root.FuriganaPlusEditor = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
 	'use strict';
 	function install(api, doc = document) {
