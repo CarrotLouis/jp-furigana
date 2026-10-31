@@ -17,9 +17,9 @@ const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeou
 	doc.body.innerHTML = markup; await tick();
 	assert.equal(listeners.size, 1);
 	const menu = doc.querySelector('.rnp-settings-menu'), inner = menu.querySelector('.rnp-settings-menu-inner');
-	assert.deepEqual([...menu.querySelector('.rnp-settings-menu-tabs').children].map(n => n.dataset.tab), ['appearance', 'lyric', 'jp-furigana-plus', 'font']);
-	assert.deepEqual([...inner.children].map(n => n.dataset.tab), ['appearance', 'lyric', 'jp-furigana-plus', 'font']);
-	const group = inner.querySelector('[data-tab="jp-furigana-plus"]');
+	assert.deepEqual([...menu.querySelector('.rnp-settings-menu-tabs').children].map(n => n.dataset.tab), ['appearance', 'lyric', 'jp-furigana', 'font']);
+	assert.deepEqual([...inner.children].map(n => n.dataset.tab), ['appearance', 'lyric', 'jp-furigana', 'font']);
+	const group = inner.querySelector('[data-tab="jp-furigana"]');
 	assert.equal(group.querySelectorAll('[data-key]').length, 12); // Includes optional desktop controls and native style inheritance.
 	assert.equal(group.querySelectorAll('[data-choice]').length, 3);
 	assert(group.querySelector('[data-desktop-custom]').hidden);
@@ -37,7 +37,9 @@ const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeou
 	group.querySelector('[data-choice="externalAutoRetry"] [data-value="off"]').click(); assert.equal(config.externalAutoRetry, 'off');
 	group.querySelector('[data-choice="externalProvider"] [data-value="utaten"]').click(); assert.equal(config.externalProvider, 'utaten');
 	const slider = group.querySelector('[data-key="rtSize"]'); slider.value = '75'; slider.dispatchEvent(new dom.window.Event('input'));
-	assert.equal(config.rtSize, 75); assert.equal(group.querySelector('[data-value-for="rtSize"]').textContent, '75%');
+	assert.equal(config.rtSize, 60, 'Dragging previews without saving configuration'); assert.equal(group.querySelector('[data-value-for="rtSize"]').textContent, '75%');
+	for (const listener of listeners) listener(); assert.equal(slider.value, '75', 'Status refresh preserves the pending slider value');
+	slider.dispatchEvent(new dom.window.Event('change')); assert.equal(config.rtSize, 75);
 	group.querySelector('[data-reset="rtSize"]').click(); assert.equal(config.rtSize, 60);
 	for (const key of ['karaoke', 'onlyFirstLine', 'skipCredits', 'skipNoKanaLines']) { const input = group.querySelector('[data-key="' + key + '"]'); input.checked = false; input.dispatchEvent(new dom.window.Event('change')); assert.equal(config[key], false); }
 	group.querySelector('[data-action="retry"]').click(); group.querySelector('[data-action="source"]').click(); assert.equal(retries, 1); assert.equal(opens, 1);
@@ -46,13 +48,13 @@ const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeou
 	inner.scrollTo = options => { inner.scrollTop = options.top; inner.dispatchEvent(new dom.window.Event('scroll')); };
 	// Simulate a stale native scroll handler registered before/after extension initialization.
 	inner.addEventListener('scroll', () => { menu.querySelector('[data-tab="lyric"]').classList.add('active'); });
-	menu.querySelector('.rnp-settings-menu-tab[data-tab="jp-furigana-plus"]').click(); await tick();
-	assert.equal(inner.scrollTop, 405); assert.equal(menu.querySelector('.rnp-settings-menu-tab.active').dataset.tab, 'jp-furigana-plus');
+	menu.querySelector('.rnp-settings-menu-tab[data-tab="jp-furigana"]').click(); await tick();
+	assert.equal(inner.scrollTop, 405); assert.equal(menu.querySelector('.rnp-settings-menu-tab.active').dataset.tab, 'jp-furigana');
 	inner.scrollTop = 392; inner.dispatchEvent(new dom.window.Event('scroll')); await tick();
-	assert.equal(menu.querySelector('.rnp-settings-menu-tab.active').dataset.tab, 'jp-furigana-plus', 'Visible heading keeps its highlight after a small layout shift');
+	assert.equal(menu.querySelector('.rnp-settings-menu-tab.active').dataset.tab, 'jp-furigana', 'Visible heading keeps its highlight after a small layout shift');
 	inner.scrollTop = 605; inner.dispatchEvent(new dom.window.Event('scroll')); await tick();
 	assert.equal(menu.querySelector('.rnp-settings-menu-tab.active').dataset.tab, 'font');
-	adapter.scan(); adapter.scan(); assert.equal(listeners.size, 1); assert.equal(inner.querySelectorAll('[data-tab="jp-furigana-plus"]').length, 1);
+	adapter.scan(); adapter.scan(); assert.equal(listeners.size, 1); assert.equal(inner.querySelectorAll('[data-tab="jp-furigana"]').length, 1);
 	doc.body.innerHTML = markup; await tick(); assert.equal(listeners.size, 1, 'Rebuilt menus release previous subscriptions');
 	assert(doc.querySelector('[data-key="enabled"]').checked);
 	doc.body.innerHTML = '<div class="rnp-settings-menu">Unsupported future structure</div>'; await tick(); assert.equal(listeners.size, 0);

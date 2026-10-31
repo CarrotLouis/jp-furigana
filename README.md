@@ -1,12 +1,8 @@
-# 日语歌词振假名 Plus · jp-furigana-plus
-
-> **1.6.2** 统一日语歌词判断：当前原歌词确认含日语后才启用注音、外部获取和桌面替代，纯英文等歌曲跳过；保留英日混合歌曲支持。包含 1.6.1 的桌面开关独立修复。正式包的桌面组件由 GitHub Actions 从公开源码编译。
+# 日语歌词振假名 · jp-furigana
 
 为网易云音乐 PC 客户端的日语歌词添加振假名，支持 **网易云音译、离线词典、外部歌词网站，以及逐词人工纠音**。
 
-本分支由 CarrotLouis 长期独立维护，商店名称为「日语歌词振假名 Plus」，标识为 `jp-furigana-plus`，在 manifest 中以 `fork_of: "jp-furigana"` 标注来源。独立版以 **`standalone` 分支**发布，`main` 保留向上游贡献的版本。
-
-这是 [Leleawa/jp-furigana](https://github.com/Leleawa/jp-furigana) 的扩展分支，保留上游的词典、罗马音对齐和逐字歌词适配。在此基础上增加网站取词、代理与自动重试、本地歌词管理和 RefinedNowPlayingNext 播放页编辑。相关改动见 [上游 PR #7](https://github.com/Leleawa/jp-furigana/pull/7)。
+1.6.3 整合外部网站、人工纠音、本地缓存管理与透明桌面注音，并修复请求与编辑冲突、缓存删除后不再获取、未知汉字吞掉已有读音等问题。插件沿用 [Leleawa/jp-furigana](https://github.com/Leleawa/jp-furigana) 的名称、标识和发布流程，RefinedNowPlayingNext 为可选适配。
 
 ## 新特性一览
 
@@ -38,32 +34,32 @@
 
 ### 环境
 
-- Windows 版网易云音乐 **高于 3.1.11**；商店版范围与 RNP 依赖保持一致。
-- [BetterNCM 1.3.4](https://github.com/std-microblock/chromatic/releases/tag/1.3.4)。
+- Windows 版网易云音乐；基础网页注音保留原版 2.10.x / 3.x 的适配逻辑，新增透明桌面注音在 3.1.42 验证。
+- BetterNCM **1.3.0 或更新版本**；建议使用 [1.3.4](https://github.com/std-microblock/chromatic/releases/tag/1.3.4)。
 - 外部网站获取需要 Windows 自带的 PowerShell 5.1 和 `curl.exe`（Windows 10 1803 或更新版本）。
-- 依赖 **RefinedNowPlayingNext**，播放页设置已适配 **3.0.2**；商店清单使用插件标识声明依赖，不能锁定具体版本。
+- 可选 **RefinedNowPlayingNext 3.0.2**，用于播放页「注音」设置与内联纠音；没有 RNP 时可使用 BetterNCM 插件设置及受支持的歌词页面。RNP 自身的客户端版本要求另计。
 
 不同客户端版本和歌词插件的页面结构可能不同，具体测试范围见 [验证记录](docs/validation.md)。[透明桌面注音](docs/desktop-lyrics.md) 使用 Windows 自带的 .NET Framework 4.8/WPF 绘制；原生桌面歌词接口本身没有振假名输入能力。
 
 ### 安装
 
-1. 在 BetterNCM 插件商店安装「日语歌词振假名 Plus」；手动安装可从 [Releases](https://github.com/CarrotLouis/jp-furigana/releases) 下载 `jp-furigana-plus-<版本>.plugin`。正式包在 [Native release](https://github.com/CarrotLouis/jp-furigana/actions/workflows/release.yml) 编译、测试后发布，源码和构建记录随 Release 提供。
+1. 在 BetterNCM 插件商店安装「日语歌词振假名」；手动安装可从 [Releases](https://github.com/Leleawa/jp-furigana/releases) 下载 `jp-furigana.plugin`。推送上游 `main` 后，CI 在检查通过且桌面组件从公开源码编译完成时创建 `v<版本>` Release；已有标签会跳过。
 2. 退出网易云音乐，将插件包放入实际 BetterNCM 数据目录下的 `plugins/`。默认通常为 `C:\betterncm\plugins`，自定义安装请以实际目录为准。
-3. 如果已经安装上游版或旧版，把旧包备份到插件目录以外，再放入新包；Plus 与原版功能重叠，请只启用一个版本；检测到原版同时加载时，Plus 会显示冲突提示并暂停。
-4. 启动网易云，进入「BetterNCM → 插件 → 日语歌词振假名 Plus」，将「读音来源」选为 **外部网站**。
-5. 确认已安装 RefinedNowPlayingNext（已适配 3.0.2），播放日语歌曲并打开歌词页，在播放页设置的「注音」中调整。
+3. 更新时把旧包备份到插件目录以外。若曾安装独立 Plus 版，先移出 Plus 包，再使用本版；每首歌的 JSON 缓存和人工修改可以继续沿用。已有原版设置优先，仅在没有原版设置时复制 Plus 偏好一次。
+4. 启动网易云，进入「BetterNCM → 插件 → 日语歌词振假名」，将「读音来源」选为 **外部网站**。
+5. 播放日语歌曲并打开歌词页。如已安装 RefinedNowPlayingNext 3.0.2，也可在播放页设置的「注音」中调整。
 
 未切换来源时，仍按原来的网易云音译方式注音；选择词典来源则使用内置 kuromoji + IPADIC 推读音。
 
 桌面注音默认开启，已保存的关闭选择会保留。**注音开关与网易云桌面歌词开关相互独立**：只开注音时等待，不打开桌面歌词或启动绘制组件；之后打开原桌面歌词即显示注音。只开原桌面歌词则保持原样。关闭桌面注音后恢复原窗口，并隐藏「沿用原桌面歌词样式」等选项；关闭原桌面歌词会停止绘制，但保留注音偏好，方便下次打开。
 
-自行打包只需安装 Node.js，检出 `standalone` 分支后，在仓库目录运行：
+自行打包需安装 Node.js，在仓库目录运行：
 
 ```sh
 node tools/pack.js
 ```
 
-产物为 `builds/jp-furigana-plus.plugin`，按上述步骤安装即可。
+产物为 `builds/jp-furigana.plugin`，按上述步骤安装即可。
 
 ## 外部网站注音
 
@@ -119,7 +115,7 @@ BetterNCM 插件设置页和 RefinedNowPlayingNext 的「注音」页都会显�
 
 状态区域简要显示匹配到的歌名、歌手和人工修改数量。两处设置同步生效；代理地址与缓存目录在原插件设置页中配置。
 
-该入口由本插件添加，**不需要修改 RNP 插件文件**。商店会根据 `requirements` 识别 RNP 依赖。手动安装缺少 RNP 或未来布局不兼容时，原 BetterNCM 设置页仍保留；这不代表该组合已通过发布版兼容验证。
+该入口由本插件添加，**不需要修改 RNP 插件文件**。RNP 是可选适配；没有 RNP 或未来布局不兼容时，BetterNCM 插件设置页仍可使用。
 
 <details>
 <summary>查看 RNP「注音」设置截图</summary>
@@ -151,7 +147,9 @@ BetterNCM 插件设置页和 RefinedNowPlayingNext 的「注音」页都会显�
 
 </details>
 
-**没有网站歌词也能编辑。** 插件会以网易云音译或词典分词为基础，为该歌曲创建本地 JSON，只保存人工修改。没有读音的可编辑汉字单元以「＋」提示。
+**没有网站歌词也能编辑。** 如果没有网站注音记录，进入编辑前先尝试获取；失败后以网易云音译或词典分词创建本地 JSON，只保存人工修改。没有读音的可编辑汉字单元以「＋」提示。
+
+网站请求进行中，第一次点击编辑按钮只把文字变成红色「将中断网站注音获取，再次点击进入编辑模式」；第二次点击才停止本轮请求并进入编辑。请求完成、换歌或开始新请求后会清除确认。主动中断只影响本轮；下次播放或手动重新获取仍可请求，人工修改会保留。
 
 人工修改优先加载，可单处恢复，也可在管理页恢复整首歌。若重新获取后原文、分词或原读音发生变化，无法匹配的修改仍保留在文件中，但不会强行套用到其他位置。
 
@@ -163,7 +161,7 @@ BetterNCM 插件设置页和 RefinedNowPlayingNext 的「注音」页都会显�
 <BetterNCM 数据目录>/lyrics/jp-furigana/<网易云歌曲 ID>.json
 ```
 
-为兼容先前扩展版，此默认目录继续沿用 `jp-furigana`；Plus 的设置、计算缓存及模块标识独立，首次升级会复制旧设置一次并保留原设置。可在设置页自定义完整磁盘路径。缓存不放在插件解压目录内，更新插件时可继续复用；更改目录不会自动搬迁原有文件。
+默认目录和歌曲 JSON 结构继续沿用，网站数据与 `userEdits` 是独立部分。可在设置页自定义完整磁盘路径。缓存不放在插件解压目录内，更新插件时可继续复用；更改目录不会自动搬迁原有文件。
 
 **每首歌始终只有一份歌曲 JSON。** 网站原文与读音保留在原字段中，人工修改额外记录在 `userEdits` 内，不另存一份完整歌词。重新获取网站歌词时也保留人工修改。
 
@@ -177,17 +175,17 @@ BetterNCM 插件设置页和 RefinedNowPlayingNext 的「注音」页都会显�
 
 ![本地歌词管理](https://github.com/user-attachments/assets/b380a6c5-60d6-4fdf-b93b-64f96619361e)
 
-缓存命中后不重复请求歌词网站。仅有人工修改的本地文件也会长期复用，想再次搜索网站时可点击「重新获取当前歌曲」。保存采用临时文件校验与原子替换，降低写入失败导致原文件损坏的风险。
+有效的网站缓存命中后不重复请求歌词网站。仅有人工修改、没有网站数据的本地文件不算网站缓存，下次播放仍会尝试获取；成功后在同一文件中合并网站数据并保留修改。保存采用临时文件校验与原子替换，降低写入失败导致原文件损坏的风险。
 
 功能不依赖数据库服务。网络与保存组件按需运行并退出；可选桌面绘制组件只在启用桌面注音且桌面歌词可见时运行，停用后退出。原插件自带的离线词典仍会占用内存，实际开销取决于客户端和歌词页面。
 
 ## 外部内容与分发
 
-MIT 等代码许可不涵盖网站歌词。歌ネット的[使用条款](https://www.uta-net.com/info/kiyaku.html)限制未经许可的抓取等使用；UtaTen 的[使用条款](https://utaten.com/index/agreement)对个人非营利浏览以外的复制、转载、修改等要求事先书面许可。目前未取得针对本插件的个别书面数据授权，外部自动获取与本地缓存的条款适用仍需另行确认。外部来源默认不启用，发布包不包含实际歌词缓存。完整网络行为、许可和商店审核说明见 [独立维护与分发](docs/distribution.md)。
+MIT 等代码许可不涵盖网站歌词。歌ネット的[使用条款](https://www.uta-net.com/info/kiyaku.html)限制未经许可的抓取等使用；UtaTen 的[使用条款](https://utaten.com/index/agreement)对个人非营利浏览以外的复制、转载、修改等要求事先书面许可。目前未取得针对本插件的个别书面数据授权，外部自动获取与本地缓存的条款适用仍需另行确认。外部来源默认不启用，发布包不包含实际歌词缓存。完整网络行为、许可和商店审核说明见 [构建与分发](docs/distribution.md)。
 
 ## 注音修复与已知限制
 
-本分支在查词和对齐时兼容部分新旧字形，例如 `會/会`、`戀/恋`、`凜/凛`、`墮/堕`，显示时保留原字。修复 `出會った` 等漏注音情况，为 `堕とす / 堕ちる` 补充语境读音，并在罗马音对齐无歧义时补全部分未知汉字。相邻长注音会预留间距，兼顾原生 ruby 和旧内核的降级排版。
+插件在查词和对齐时兼容部分新旧字形，例如 `會/会`、`戀/恋`、`凜/凛`、`墮/堕`，显示时保留原字。修复 `出會った` 等漏注音情况，为 `堕とす / 堕ちる` 补充语境读音，并在罗马音对齐无歧义时补全部分未知汉字。相邻长注音会预留间距，兼顾原生 ruby 和旧内核的降级排版。
 
 使用时还需注意：
 
@@ -221,7 +219,7 @@ node tests/cache-write.test.cjs
 
 ## 致谢与许可
 
-感谢 [Leleawa/jp-furigana](https://github.com/Leleawa/jp-furigana) 提供原始插件及词典、罗马音对齐与歌词适配基础。本分支保留上游历史和许可。
+原始插件、词典注音、罗马音对齐和歌词界面适配由 [leleawa](https://github.com/Leleawa) 提供。感谢 [CarrotLouis](https://github.com/CarrotLouis) 贡献外部网站来源、人工纠音、本地管理、RNP 设置和透明桌面注音等扩展。完整贡献记录见 Git 历史。
 
 插件代码采用 **MIT** 协议，见 [LICENSE](LICENSE)。随包分发的第三方组件见 [NOTICE.md](NOTICE.md)：
 

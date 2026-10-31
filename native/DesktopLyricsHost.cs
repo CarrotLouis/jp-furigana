@@ -19,7 +19,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
-namespace FuriganaPlusDesktop {
+namespace FuriganaDesktop {
     static class Data {
         [ThreadStatic] static JavaScriptSerializer json;
         public static JavaScriptSerializer Json { get { return json ?? (json = new JavaScriptSerializer { MaxJsonLength = 524288, RecursionLimit = 24 }); } }
@@ -172,7 +172,7 @@ namespace FuriganaPlusDesktop {
         public const double HideDelayMilliseconds=2000;
         public bool Locked { get { return locked; } }
         public LyricsWindow(Action<string,object> send) {
-            action=send;Title="日语歌词振假名 Plus · 桌面歌词";WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;
+            action=send;Title="日语歌词振假名 · 桌面歌词";WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;
             ShowInTaskbar=false;ShowActivated=false;Topmost=true;ResizeMode=ResizeMode.CanResize;SizeToContent=SizeToContent.Height;Template=FramelessTemplate();
             Width=900;MinWidth=240;MaxWidth=SystemParameters.VirtualScreenWidth;MinHeight=60;
             var grid=new Grid {Margin=new Thickness(8,0,8,8),Background=Brushes.Transparent};grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto,MinHeight=32});grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});
@@ -261,7 +261,7 @@ namespace FuriganaPlusDesktop {
                 bool empty;lock(events)empty=events.Count==0;if(empty)signal.WaitOne(1000);
                 var batch=new List<object>();lock(events){while(events.Count>0)batch.Add(events.Dequeue());}Reply(stream,200,Data.Json.Serialize(new {events=batch}));return;
             }
-            if(request[0]=="GET"&&uri.AbsolutePath=="/health"){var process=Process.GetCurrentProcess();Reply(stream,200,Data.Json.Serialize(new {version="1.6.0",workingSetBytes=process.WorkingSet64,privateBytes=process.PrivateMemorySize64,cpuMilliseconds=process.TotalProcessorTime.TotalMilliseconds}));return;}
+            if(request[0]=="GET"&&uri.AbsolutePath=="/health"){var process=Process.GetCurrentProcess();Reply(stream,200,Data.Json.Serialize(new {version="1.6.3",workingSetBytes=process.WorkingSet64,privateBytes=process.PrivateMemorySize64,cpuMilliseconds=process.TotalProcessorTime.TotalMilliseconds}));return;}
             if(request[0]!="POST"){Reply(stream,404,"{}");return;}
             int length=0;foreach(string h in lines){if(h.StartsWith("Transfer-Encoding:",StringComparison.OrdinalIgnoreCase)){Reply(stream,400,"{}");return;}if(h.StartsWith("Content-Length:",StringComparison.OrdinalIgnoreCase))int.TryParse(h.Substring(15).Trim(),out length);}
             if(length<0||length>524288){Reply(stream,413,"{}");return;}var body=new byte[length];for(int at=0;at<length;){int n=stream.Read(body,at,length-at);if(n<=0)return;at+=n;}
@@ -290,7 +290,7 @@ namespace FuriganaPlusDesktop {
                 window=new LyricsWindow((type,value)=>server.Send(type,value));
                 if(Data.Bool(cfg,"offscreenTest")){window.Left=-10000;window.Top=-10000;}
                 var watchdog=new DispatcherTimer {Interval=TimeSpan.FromSeconds(2)};watchdog.Tick+=(s,e)=>{if(DateTime.UtcNow-server.LastSeen>TimeSpan.FromSeconds(15))shutdown();};watchdog.Start();
-                File.WriteAllText(ready,Data.Json.Serialize(new {protocol=1,version="1.6.0",port=server.Port,token=token,pid=Process.GetCurrentProcess().Id}),new UTF8Encoding(false));
+                File.WriteAllText(ready,Data.Json.Serialize(new {protocol=1,version="1.6.3",port=server.Port,token=token,pid=Process.GetCurrentProcess().Id}),new UTF8Encoding(false));
                 app.Run();watchdog.Stop();return 0;
             }catch(Exception e){if(ready!=null)try{File.WriteAllText(ready+".error",e.GetType().Name+": "+e.Message);}catch{}return 1;}
             finally{if(server!=null)server.Dispose();if(ready!=null&&File.Exists(ready))File.Delete(ready);}

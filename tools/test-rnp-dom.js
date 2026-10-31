@@ -131,8 +131,8 @@ win.betterncm = {
 	},
 };
 // 只用词典，不联网取音译
-win.localStorage.setItem('jp-furigana-plus.config', JSON.stringify({ readingSource: 'dict' }));
-if (NO_RUBY) win.localStorage.setItem('jp-furigana-plus.no-ruby', '1');
+win.localStorage.setItem('jp-furigana.config', JSON.stringify({ readingSource: 'dict' }));
+if (NO_RUBY) win.localStorage.setItem('jp-furigana.no-ruby', '1');
 
 const load = (f) => win.eval(fs.readFileSync(path.join(ROOT, 'src', f), 'utf8'));
 load('kuromoji.js');
@@ -154,14 +154,14 @@ function check(ok, label, detail) {
 
 (async () => {
 	await handlers.load();
-	for (let i = 0; i < 120 && !win.JPFuriganaPlus.state.tokenizer; i++) await sleep(250);
-	if (!win.JPFuriganaPlus.state.tokenizer)
-		throw new Error('词典没加载起来: ' + win.JPFuriganaPlus.state.loadError);
+	for (let i = 0; i < 120 && !win.JPFurigana.state.tokenizer; i++) await sleep(250);
+	if (!win.JPFurigana.state.tokenizer)
+		throw new Error('词典没加载起来: ' + win.JPFurigana.state.loadError);
 
-	win.JPFuriganaPlus.pass();
+	win.JPFurigana.pass();
 	await sleep(800);
 
-	const st = win.JPFuriganaPlus.state;
+	const st = win.JPFurigana.state;
 	console.log(
 		`
 === ${BAR ? 'LyricBar' : 'RNP'} 逐字歌词（${MODE} 动画${NO_RUBY ? '，内核不认 ruby' : ''}）===`
@@ -289,7 +289,7 @@ function check(ok, label, detail) {
 		),
 		'整行改写的普通行不带 fg-word（保持 display:inline，能正常折行）'
 	);
-	const css = win.document.getElementById('jp-furigana-plus-style').textContent;
+	const css = win.document.getElementById('jp-furigana-style').textContent;
 	check(
 		/\.fg-line\.fg-word\s*\{[^}]*inline-block[^}]*padding-top:\s*var\(--fg-word-offset/.test(css),
 		'逐字宿主的让位量走 --fg-word-offset（量出来的，不是写死的），且加在每个词上'
@@ -318,7 +318,7 @@ function check(ok, label, detail) {
 	// 空转：行没变就不该再动 DOM
 	const before = recalcCount;
 	for (let i = 0; i < 3; i++) {
-		win.JPFuriganaPlus.pass();
+		win.JPFurigana.pass();
 		await sleep(250);
 	}
 	check(recalcCount === before, '空转几轮不会反复发 recalc');
@@ -342,21 +342,21 @@ function check(ok, label, detail) {
 		// 反过来：RNP 那份藏起来、原生页露出来时，应该回去注原生的
 		win.document.getElementById('rnp-view').style.visibility = 'hidden';
 		win.document.querySelector('#root .g-single').style.visibility = 'visible';
-		win.JPFuriganaPlus.pass();
+		win.JPFurigana.pass();
 		await sleep(600);
 		check(
-			/ul\.lyric/.test(win.JPFuriganaPlus.state.matchedBy || ''),
+			/ul\.lyric/.test(win.JPFurigana.state.matchedBy || ''),
 			'原生播放页露出来时会切回去注它',
-			win.JPFuriganaPlus.state.matchedBy
+			win.JPFurigana.state.matchedBy
 		);
 		check(win.document.querySelectorAll('#root .lyric .fg-rt').length > 0, '原生歌词注上了音');
 		win.document.getElementById('rnp-view').style.visibility = '';
 		win.document.querySelector('#root .g-single').style.visibility = 'hidden';
-		win.JPFuriganaPlus.pass();
+		win.JPFurigana.pass();
 		await sleep(600);
 
 		// 诊断接口别在真机上炸（jsdom 没有排版，只验能跑通）
-		const dump = win.JPFuriganaPlus.dumpLine();
+		const dump = win.JPFurigana.dumpLine();
 		check(
 			dump && dump.build && Array.isArray(dump.逐字切法) && Array.isArray(dump.注音),
 			'dumpLine 能输出逐字切法和注音测量',
@@ -365,7 +365,7 @@ function check(ok, label, detail) {
 	}
 
 	// 关掉之后要还原干净
-	win.JPFuriganaPlus.disable();
+	win.JPFurigana.disable();
 	await sleep(300);
 	check(win.document.querySelectorAll('ruby').length === 0, '关掉后 DOM 还原干净');
 	// slide 下每个词本来就有两份文本（filler 副本），只数本体

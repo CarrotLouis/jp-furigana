@@ -1,41 +1,18 @@
-# 独立维护与商店分发
+# 构建与商店分发
 
-## 项目标识
+## 项目标识与配置
 
-- 名称：日语歌词振假名 Plus。
-- 插件 slug：`jp-furigana-plus`，来源标记：`fork_of: "jp-furigana"`。
-- 维护者：CarrotLouis；上游作者：leleawa。
-- 商店依赖：`RefinedNowPlayingNext`，已适配 3.0.2；`requirements` 不支持版本锁定。
-- 商店跟踪：`CarrotLouis/jp-furigana` 的 `standalone` 分支，子目录 `/src`。
-- `main` 保留向上游贡献的版本与原 PR；独立版的后续修复、版本发布和商店更新使用 `standalone`。
+- 名称：日语歌词振假名；插件标识：`jp-furigana`；作者：leleawa。
+- [源码与说明](https://github.com/Leleawa/jp-furigana)、[问题反馈](https://github.com/Leleawa/jp-furigana/issues)和 manifest 作者链接均指向原仓库。
+- RefinedNowPlayingNext 为可选适配，已适配 3.0.2；未安装时使用 BetterNCM 插件设置与受支持的原歌词页面。
+- 原版设置继续存入 `jp-furigana.config`。仅在没有原版设置时复制 Plus 偏好一次；已有原版配置优先，Plus 原配置不修改。
+- 歌曲文件继续使用 `<BetterNCM 数据目录>/lyrics/jp-furigana/<歌曲 ID>.json`；网站字段、`manualSource` 与 `userEdits` 保持原结构，每曲一个文件。
 
-源码、使用说明和问题反馈分别为：
+从 Plus 迁移时先退出网易云，把 Plus 包移到插件目录外，再安装本版。人工纠音与网站 JSON 无需转换；自定义路径也可继续使用。不要将实际歌词、用户修改、代理地址或账号凭据放入源码和发布包。
 
-- [独立版源码与说明](https://github.com/CarrotLouis/jp-furigana/tree/standalone)
-- [问题反馈](https://github.com/CarrotLouis/jp-furigana/issues)
-- [上游项目](https://github.com/Leleawa/jp-furigana)
+## 本地构建
 
-## 安装与迁移
-
-Plus 与原版功能重叠，应只启用一个版本。先在 BetterNCM 中移除原版并退出网易云；也可退出网易云后将旧 `.plugin` 移到插件目录外，再安装 Plus。若同时检测到 `jp-furigana`，Plus 会在设置中说明冲突并暂停启动，移除原版后重启即可。
-
-独立版使用自己的模块、词典读取钩子、设置及计算缓存。首次启动时，若尚无 Plus 设置，会复制旧 `jp-furigana.config` 一次；后续保存不会覆盖旧设置。保留默认网站缓存目录 `<BetterNCM 数据目录>/lyrics/jp-furigana/`，以兼容先前扩展版已保存的网站歌词和人工纠音 JSON。自定义缓存目录也可继续使用。
-
-每个歌曲 ID 仍只有一份歌曲 JSON；不要将实际歌词、用户修改或代理地址放进源码或发布包。
-
-## 分发内容与复现
-
-商店登记 `/src`；该目录包含运行脚本、PowerShell 源文件、预览图、离线词典、所需许可证，以及 1.6.0 的桌面绘制组件 `desktop-host.exe`。`node tools/pack.js` 的本地包与 `/src` 文件清单一致，不依赖构建时下载歌词或私有服务。商店在打包时会把预览图单独移到预览目录，再将其余内容打成 `.plugin`；因此商店包与 Release 包的预览图封装方式有所不同，运行源码相同。
-
-桌面组件源码位于 `native/DesktopLyricsHost.cs`，使用本工程 MIT 许可；Windows 上可用 `powershell.exe -NoProfile -File tools/build-desktop-host.ps1 -Check` 重新编译并验证。它不注入本机 DLL，仅在桌面歌词可见时运行独立的 WPF 绘制进程，以回环地址和随机密钥传递当前行和控制事件，详见 [桌面注音](desktop-lyrics.md)。
-
-依据 [商店上架准则](https://github.com/std-microblock/chromatic/wiki/插件商店上架插件方式及准则)，本机应用的源码公开，并由 GitHub Actions 编译。正式发布采用以下流程：
-
-1. 将候选源码提交到与版本一致的 `release/<版本>` 分支，触发 [Native release](https://github.com/CarrotLouis/jp-furigana/actions/workflows/release.yml)。
-2. Windows 作业先移除已有可执行文件，从公开 C# 重新编译，再执行原生自测、控制器与网页回归、文件原子保存、IPC、分发检查和打包。
-3. 全部通过后才快进更新 `standalone`；该提交包含本次编译的可执行文件及 `desktop-build-info.json`，记录构建输入、工作流地址和每个运行文件的 SHA-256。失败的构建不更新商店跟踪分支。
-4. 从发布提交的 Git 对象打包，逐文件核对哈希，发布 `plus-v<版本>` Release、版本化 `.plugin` 和 `SHA256SUMS.txt`。重复发布流程复用已经验证的同版本字节，禁止无版本变更替换运行代码。
-5. 插件商店继续跟踪 `standalone` 的 `/src`，提交对应源码更新供商店维护者审核；审核合并后由商店打包发布，无需另向商店上传 `.plugin`。
+商店登记子目录 `/src`，其中包含运行脚本、公开 PowerShell 源码、预览图、离线词典、许可副本及桌面组件 `desktop-host.exe`。`node tools/pack.js` 的文件清单与 `/src` 一致，manifest 位于 ZIP 根层。
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
@@ -46,16 +23,36 @@ node tools/test-rnp-dom.js lyricbar
 node tools/pack.js
 ```
 
-本地包：`builds/jp-furigana-plus.plugin`。普通 CI 提供测试用 `jp-furigana-plus-plugin` artifact；正式 Native release 提供 `jp-furigana-plus-release` artifact 和 Release 下载。组件依赖系统 .NET Framework 4.8，不包含本机 DLL。
+本地产物是 `builds/jp-furigana.plugin`。商店会将预览图单独发布，所以商店包与本地包的预览图封装方式不同，运行源码一致。
+
+桌面组件公开源码为 `native/DesktopLyricsHost.cs`，MIT 许可；Windows 使用系统 .NET Framework 4.8/WPF 编译，无本机 DLL 注入：
+
+```powershell
+powershell.exe -NoProfile -File tools/build-desktop-host.ps1 -Check
+node tests/cache-write.test.cjs
+node tests/desktop-native.test.cjs
+```
+
+## CI 与上游发布
+
+[CI](https://github.com/Leleawa/jp-furigana/actions/workflows/ci.yml) 保留原有 `main` 自动发布行为，增加 Windows 原生组件编译作业：
+
+1. `test` 在 Linux 执行语法、分发、离线回归、六种 RNP / LyricBar 兼容场景与打包检查。
+2. `windows-native` 删除工作目录原有可执行文件，从公开 C# 源码重新编译，执行透明绘制自测、文件原子保存及实际回环 IPC / 生命周期测试。
+3. Windows 作业用本次编译文件打包，上传 `jp-furigana-plugin` artifact，包含 `.plugin`、可执行文件和 `native-build-info.json`。来源记录包含输入提交、工作流地址及源码、构建脚本、可执行文件、插件包的 SHA-256。
+4. 只有上述两项作业都成功，且事件为 **Leleawa/jp-furigana 的 main 推送**时，发布作业才以 `contents: write` 创建 `v<manifest.version>` Release，附上 Windows 作业的包和来源记录。标签已存在则跳过。
+5. Fork 与 PR 运行相同检查和 Windows 编译，但不自动创建独立 Release，不快进其他分支，也不替上游发布。
+
+仓库 `/src` 保留可分发的桌面组件。修改 C# 源码后应使用相同提交的 GitHub Actions 产物更新该文件，并保留构建来源记录；不要用未经验证的本地二进制覆盖商店运行文件。CI Release 使用当前 Windows 作业重新编译的包。
 
 ## 网络、进程与本地数据
 
-- 默认来源是网易云音译；外部网站来源需用户选择。词典来源不向歌词网站联网。
-- 网易云模式使用客户端的歌曲信息和官方歌词接口；外部模式会向 UtaTen 或歌ネット发送当前歌名、歌手及歌词页地址，歌词片段核对在本地完成。
-- 仅访问代码限定的两个网站 HTTPS 地址；保持 TLS 证书验证，不绕过登录或验证码。代理仅用于网站请求，不包含账号密码。
-- Windows 自带 PowerShell 与 `curl.exe` 按需执行；PowerShell 脚本随源码公开。获取失败保留原有注音，取消和重试次数有上限，没有常驻服务或全曲库爬取任务。
-- 歌词、来源地址及人工修改保存到本地 JSON；代理配置保存在客户端本地设置中。插件不提供缓存上传、公共歌词数据库或遥测功能。
-- 文件保存使用临时文件校验与原子替换；临时交换文件在完成后清理。
+- 默认读音来源是网易云音译；外部网站需用户选择。在音译／词典模式主动进入编辑时，如果缺少网站数据，也会先尝试网站获取；可两次点击明确中断后编辑。
+- 仅当前歌曲原歌词确认包含日语时触发注音与外部网站获取；曲名、歌手、翻译、制作信息和旧曲残留不作为判断依据。
+- 外部请求向 UtaTen 或歌ネット发送歌名、歌手或歌词页 URL；歌词片段核对在本地完成。地址限定 HTTPS，验证 TLS，不绕过登录或验证码。
+- PowerShell 与系统 `curl.exe` 按需运行；失败回退并显示原因，重试有界，无全曲库爬取任务。代理配置仅存本地，不随包发布。
+- 歌曲 JSON 仅存本地，无遥测、缓存上传或公共歌词数据库。临时文件校验后原子替换，写入失败保留原文件。
+- 可选桌面组件仅在启用桌面注音且原桌面歌词开启时运行，用本机回环与随机密钥传递当前行，停用后退出，详见 [桌面注音](desktop-lyrics.md)。
 
 ## 许可与外部内容
 
@@ -68,23 +65,12 @@ node tools/pack.js
 
 外部来源的自动获取和本地缓存存在需要另行确认的条款问题；关闭自动重试、保留来源链接或不随包分发歌词，均不等于获得授权。商店提交应完整披露此行为与授权状态，由维护者判断是否收录或要求调整。发布包不包含实际下载的歌词缓存。
 
-## 兼容性与验收边界
+## 商店更新路径
 
-最低声明 BetterNCM 1.3.4；商店版依赖 RefinedNowPlayingNext，已适配 3.0.2，网易云范围跟随该依赖为高于 3.1.11。基础代码保留上游 2.10.x 网页歌词处理，但不将其作为当前商店版支持范围。1.6.0 提供横排透明桌面注音，已在网易云 3.1.42 验证透明显示和进度跟随。新旧内核与逐字 filler 的模拟 DOM、实际词典和 Windows 原子保存分别测试，不将模拟结果写作全版本实机验证。完整记录见 [验证记录](validation.md)。
+继续使用原插件 `jp-furigana` 的原仓库登记和 `/src`；无需新建独立插件条目。商店的源码更新脚本读取登记仓库及分支，生成 `plugins-data` 更新审核 PR。审核合并后，打包工作流把预览图发布到 `previews/`，将运行文件打成 `.plugin` 并更新索引；不需要把手工生成的插件包提交到插件库。
 
-## 从提交到上架
+独立 Plus 版的下架需等原版合并并上架后另行处理，本次不修改其商店条目。仓库推送成功不等于商店已完成更新。
 
-1. 维护者审核并合并 `plugins-list/jp-furigana-plus.json` 登记 PR。
-2. 更新脚本读取 `standalone/src/manifest.json`，从该分支抓取整个 `/src`，处理 `.betterncm-ignore`（如有），生成 `plugins-data` 源码更新审核 PR。
-3. 源码更新审核 PR 合并后，打包工作流把预览图单独发布到 `previews/`，将运行文件以 manifest 为压缩包根目录打成 `plugins/jp-furigana-plus-<版本>.plugin`，并生成 `plugins.json` 索引。
-4. 产物推送到 `BetterNCM/BetterNCM-Packed-Plugins`，商店刷新索引后显示并提供安装。
+流程参考：[插件库提交说明](https://github.com/BetterNCM/BetterNCM-Plugins#插件提交及更新)、[官方上架准则](https://github.com/std-microblock/chromatic/wiki/插件商店上架插件方式及准则)、[源码更新脚本](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/scripts/update-plugins/update-plugins.js)和[打包工作流](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/.github/workflows/pack-and-push.yml)。
 
-只需在登记中提供正确仓库、分支和 `/src`；不需要把手工生成的 `.plugin` 提交到插件库。GitHub Release 或 CI artifact 方便手动安装，但不是此抓取流程的输入。审核与工作流执行需要维护者处理，不保证登记 PR 一合并就立即上架。
-
-流程依据：[源码更新脚本](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/scripts/update-plugins/update-plugins.js)、[打包脚本](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/scripts/pack-plugins/pack-plugins.js)、[发布工作流](https://github.com/BetterNCM/BetterNCM-Plugins/blob/master/.github/workflows/pack-and-push.yml)。
-
-## 后续商店更新
-
-后续在 `standalone` 修改、验证，并提升 `src/manifest.json` 与 npm 元数据版本后推送。商店按登记的分支和 `/src` 生成更新审核；本仓库推送成功不等于商店审核已通过。保持同一独立 slug，不使用强制安装／更新／卸载字段，不改动原作者的商店来源。
-
-参考：[插件库提交说明](https://github.com/BetterNCM/BetterNCM-Plugins#插件提交及更新)、[官方上架准则](https://github.com/std-microblock/chromatic/wiki/插件商店上架插件方式及准则)。
+基础网页逻辑保留原有 2.10.x / 3.x 适配，不把 DOM 模拟测试表述成所有版本实机验证。透明桌面注音在网易云 3.1.42 验证；目前仅支持横排，竖排回退原窗口。完整边界见 [验证记录](validation.md)。

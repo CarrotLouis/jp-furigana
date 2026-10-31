@@ -3,10 +3,10 @@
 //
 // 修改项（独立版采用专属全局标识）：
 //   1. UMD 头部：网易云页面里存在 AMD 的 define，原始头部会把模块注册给 define
-//      而不是挂到 window 上，这里强制挂到 window.kuromojiFuriganaPlus。
+//      而不是挂到 window 上，这里强制挂到 window.kuromoji。
 //   2. path.join：browserify 的 path.join 会把 "http://a" 规范化成 "http:/a"，
 //      词典 URL 一律用简单拼接。
-//   3. loadArrayBuffer：允许外部通过 window.__FURIGANA_PLUS_DICT_LOADER__ 提供
+//   3. loadArrayBuffer：允许外部通过 window.__FURIGANA_DICT_LOADER__ 提供
 //      读取器，这样可以走 betterncm.fs 读本地文件，不依赖 HTTP 端口。
 
 const fs = require('fs');
@@ -25,7 +25,7 @@ const umdHead =
 	'(function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.kuromoji = f()}})(';
 if (!code.startsWith(umdHead)) throw new Error('UMD header not found — kuromoji version changed?');
 code =
-	'(function(f){var m=f();var g=(typeof window!=="undefined")?window:(typeof globalThis!=="undefined"?globalThis:this);g.kuromojiFuriganaPlus=m;if(typeof module==="object"&&module&&module.exports)module.exports=m;})(' +
+	'(function(f){var m=f();var g=(typeof window!=="undefined")?window:(typeof globalThis!=="undefined"?globalThis:this);g.kuromoji=m;if(typeof module==="object"&&module&&module.exports)module.exports=m;})(' +
 	code.slice(umdHead.length);
 
 // --- 2. 词典路径拼接 ---
@@ -47,7 +47,7 @@ if (!code.includes(loaderHead)) throw new Error('loadArrayBuffer not found');
 code = code.replace(
 	loaderHead,
 	'BrowserDictionaryLoader.prototype.loadArrayBuffer = function (url, callback) {\n' +
-		'    var custom = (typeof globalThis !== "undefined") && globalThis.__FURIGANA_PLUS_DICT_LOADER__;\n' +
+		'    var custom = (typeof globalThis !== "undefined") && globalThis.__FURIGANA_DICT_LOADER__;\n' +
 		'    if (custom) {\n' +
 		'        Promise.resolve(custom(url)).then(function (ab) {\n' +
 		'            try {\n' +
@@ -69,9 +69,9 @@ const banner = `/*
  *
  * NOTICE: This file has been MODIFIED from the upstream release by the
  * jp-furigana BetterNCM plugin. Changes (see tools/patch-kuromoji.js):
- *   1. UMD header always assigns to window.kuromojiFuriganaPlus.
+ *   1. UMD header always assigns to window.kuromoji.
  *   2. Dictionary paths are joined by plain concatenation instead of path.join.
- *   3. Added a globalThis.__FURIGANA_PLUS_DICT_LOADER__ hook to loadArrayBuffer.
+ *   3. Added a globalThis.__FURIGANA_DICT_LOADER__ hook to loadArrayBuffer.
  * See also NOTICE.md for the bundled IPADIC dictionary license.
  */
 `;

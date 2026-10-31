@@ -1,7 +1,7 @@
 /* Additive, position-scoped reading overrides. Website fields remain untouched. */
 (function (root, factory) {
 	if (typeof module === 'object' && module.exports) module.exports = factory(require('./external-core.js'));
-	else root.FuriganaPlusUserEdits = factory(root.FuriganaPlusExternalCore);
+	else root.FuriganaUserEdits = factory(root.FuriganaExternalCore);
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
 	'use strict';
 	const canonical = value => core.kana(value, 'hiragana');

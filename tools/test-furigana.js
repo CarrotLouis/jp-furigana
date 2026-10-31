@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 
 // 浏览器构建里的词典读取器走 XHR，node 里没有；用补丁留下的钩子接上 fs
-globalThis.__FURIGANA_PLUS_DICT_LOADER__ = (p) =>
+globalThis.__FURIGANA_DICT_LOADER__ = (p) =>
 	fs.promises.readFile(p).then((b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 
 const kuromoji = require(path.join(__dirname, '..', 'src', 'kuromoji.js'));

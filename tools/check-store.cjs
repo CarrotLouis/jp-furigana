@@ -7,8 +7,9 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
 assert.equal(lock.version,pkg.version,'Lockfile version must match package.json');assert.equal(lock.packages[''].version,pkg.version,'Lockfile root metadata must match package.json');
 for (const key of ['name','slug','version','author','author_link','description','preview','betterncm_version']) assert(m[key], 'Missing ' + key);
-assert.equal(m.slug, 'jp-furigana-plus'); assert.equal(m.fork_of, 'jp-furigana'); assert.equal(m.version, pkg.version);
-assert.deepEqual(m.requirements, ['RefinedNowPlayingNext']); assert.equal(m['ncm-version-req'], '> 3.1.11');
+assert.equal(m.slug, 'jp-furigana'); assert(!m.fork_of); assert.equal(m.version, pkg.version);
+assert.equal(m.author,'leleawa');assert.equal(m.author_link,'https://github.com/Leleawa/jp-furigana');
+assert.deepEqual(m.requirements, [], 'RNP remains an optional adapter');
 assert.equal(m.require_restart, true); assert(!m.native_plugin, 'No in-process native DLL');
 assert(fs.existsSync(path.join(root,'native/DesktopLyricsHost.cs')), 'Desktop helper source must accompany its binary');
 assert.equal(fs.readFileSync(path.join(src,'desktop-host.exe')).subarray(0,2).toString(),'MZ','Desktop renderer must be a Windows executable');
@@ -23,4 +24,6 @@ for (const p of ['README.md','docs/external-lyrics.md','docs/distribution.md']) 
 }
 const main = fs.readFileSync(path.join(src,'main.js'),'utf8');
 assert(main.includes('betterncm.ncm.openUrl')); assert(main.includes('反馈问题')); assert(main.includes('源码仓库'));
-console.log('Store checks passed: independent identity, fork attribution, version, restart, small preview, license copies, scripts, support links and documentation.');
+assert(main.includes("const REPO_URL = 'https://github.com/Leleawa/jp-furigana'"));
+assert(main.includes('window.JPFurigana ='));assert(!main.includes('tree/standalone'));
+console.log('Store checks passed: upstream identity, optional adapters, version, restart, small preview, license copies, native source, support links and documentation.');

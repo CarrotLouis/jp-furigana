@@ -1,6 +1,6 @@
 # 透明桌面注音（1.6.0）
 
-在 BetterNCM 的 Plus 设置或 RefinedNowPlayingNext →「注音」中控制「启用注音桌面歌词」。默认开启，保留已经保存的关闭选择；原桌面歌词关闭时不运行绘制组件。网页与桌面共用读音来源、假名类型、注音大小、不透明度以及已保存的人工纠音，不再下载或保存第二份歌词。
+在 BetterNCM 的插件设置或 RefinedNowPlayingNext →「注音」中控制「启用注音桌面歌词」。默认开启，保留已经保存的关闭选择；原桌面歌词关闭时不运行绘制组件。网页与桌面共用读音来源、假名类型、注音大小、不透明度以及已保存的人工纠音，不再下载或保存第二份歌词。
 
 两个开关相互独立。1.6.1 起，切换「启用注音桌面歌词」不会更改网易云的桌面歌词开关：先开注音、后开桌面歌词，或先开桌面歌词、后开注音，都会在两者均开启时接管。只开注音时不显示任何歌词窗口，也不启动绘制组件；只开原桌面歌词时保持原生显示。关闭原桌面歌词会停止绘制，保留注音偏好；关闭注音则在原桌面歌词仍开启时恢复原生显示。
 
@@ -34,7 +34,7 @@
 
 ## 构建与验证
 
-源代码位于 `native/DesktopLyricsHost.cs`，使用本工程 MIT 许可。正式包的组件由 GitHub Actions 从源码编译，通过测试后才更新商店跟踪的 `standalone` 分支；构建输入与文件哈希记录在 `desktop-build-info.json`。Windows 下也可用系统 .NET Framework 编译器重新构建并执行透明像素、锁定穿透、解锁回归：
+源代码位于 `native/DesktopLyricsHost.cs`，使用本工程 MIT 许可。正式包的组件由 CI 的 Windows 作业从源码编译，Linux 回归和 Windows 自测均通过后，上游 `main` 的推送才会创建 Release；构建输入、工作流地址和包哈希记录在随构建产物提供的 `native-build-info.json`。Windows 下也可用系统 .NET Framework 编译器重新构建并执行透明像素、锁定穿透、解锁回归：
 
 ```powershell
 powershell.exe -NoProfile -File tools/build-desktop-host.ps1 -Check

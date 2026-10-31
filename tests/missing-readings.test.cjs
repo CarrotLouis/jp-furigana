@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
-globalThis.__FURIGANA_PLUS_DICT_LOADER__ = p => fs.promises.readFile(p).then(b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+globalThis.__FURIGANA_DICT_LOADER__ = p => fs.promises.readFile(p).then(b => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 const kuromoji = require('../src/kuromoji.js'), core = require('../src/furigana.js');
 const examples = [
 	['それは二人が出會ったあの日まで 遡る', 'so re wa fu ta ri ga de a tta a no hi ma de sa ka no bo ru', { 出會: 'であ' }],
@@ -45,6 +45,15 @@ kuromoji.builder({ dicPath: path.resolve(__dirname, '../src/dict') }).build((err
 		assert(!ambiguous || !ambiguous.some(s => s.text === '鵺' && s.rt), 'Do not guess ambiguous unknown-word boundaries');
 		const noEvidence = core.tokensToSegments([{ surface_form: '鵺', word_type: 'UNKNOWN' }]);
 		assert(!noEvidence[0].rt, 'No invented dictionary pronunciation');
+		const partialText = '背负の空を見た', partialDict = [{text:'背',rt:'せ',at:0},{text:'负'},{text:'の'},{text:'空',rt:'そら',at:3},{text:'を'},{text:'見',rt:'み',at:5},{text:'た'}];
+		const partial = core.segmentsFromReading(partialText, 'せのねのそらをみた', partialDict);
+		assert(partial.some(s=>s.text==='背'&&s.rt==='せ'&&s.at===0), 'An ambiguous merged unknown run restores its known dictionary segments');
+		assert(!partial.some(s=>s.text.includes('负')&&s.rt), 'The unresolved unknown part still has no invented reading');
+		assert.equal(partial.map(s=>s.text).join(''),partialText);
+		assert.deepEqual(partialDict,[{text:'背',rt:'せ',at:0},{text:'负'},{text:'の'},{text:'空',rt:'そら',at:3},{text:'を'},{text:'見',rt:'み',at:5},{text:'た'}], 'Fallback must not mutate dictionary cache entries');
+		const distant = core.segmentsFromReading('鵺を山がぎゅっと抱く','ぬえをやまがぎゅとだく',
+			[{text:'鵺'},{text:'を'},{text:'山',rt:'やま',at:2},{text:'がぎゅっと'},{text:'抱',rt:'だ',at:8},{text:'く'}]);
+		assert(distant&&distant.some(s=>s.text==='鵺'&&s.rt==='ぬえ'), 'An unknown elsewhere must not make a distant sokuon mandatory');
 		console.log('Missing-reading regression tests passed: screenshot lines, modern/traditional glyphs, dictionary/romaji/katakana, verb context, unknown recovery, ambiguity and exact offsets.');
 	} catch (e) { console.error(e); process.exitCode = 1; }
 });

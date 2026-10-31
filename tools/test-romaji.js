@@ -3,7 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 
-globalThis.__FURIGANA_PLUS_DICT_LOADER__ = (p) =>
+globalThis.__FURIGANA_DICT_LOADER__ = (p) =>
 	fs.promises.readFile(p).then((b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
 
 const kuromoji = require(path.join(__dirname, '..', 'src', 'kuromoji.js'));

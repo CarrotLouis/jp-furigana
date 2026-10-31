@@ -20,7 +20,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 			{segments:[{text:'<script>文字だけ</script>',rt:'もじ'}],translation:'<img src=x>',fontSize:20,locked:false}];
 		for(const frame of frames){assert((await request('/frame',frame)).ok);await sleep(100);}
 		const events=await request('/events');assert(Array.isArray(events.events));
-		const health=await request('/health');assert.equal(health.version,'1.6.0');assert(health.workingSetBytes>0);
+		const health=await request('/health');assert.equal(health.version,require('../src/manifest.json').version);assert(health.workingSetBytes>0);
 		for(let i=0;i<3;i++)await request('/events');const idle=await request('/health');
 		await request('/stop',{});const code=await Promise.race([exit,sleep(5000).then(()=>{throw Error('Native host did not exit');})]);assert.equal(code,0);
 		assert.equal(await fs.access(ready).then(()=>true,()=>false),false,'Ready file must be removed at exit');
