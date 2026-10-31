@@ -132,7 +132,7 @@ win.betterncm = {
 };
 // 只用词典，不联网取音译
 win.localStorage.setItem('jp-furigana-plus.config', JSON.stringify({ readingSource: 'dict' }));
-if (NO_RUBY) win.localStorage.setItem('jp-furigana.no-ruby', '1');
+if (NO_RUBY) win.localStorage.setItem('jp-furigana-plus.no-ruby', '1');
 
 const load = (f) => win.eval(fs.readFileSync(path.join(ROOT, 'src', f), 'utf8'));
 load('kuromoji.js');
@@ -289,7 +289,7 @@ function check(ok, label, detail) {
 		),
 		'整行改写的普通行不带 fg-word（保持 display:inline，能正常折行）'
 	);
-	const css = win.document.getElementById('jp-furigana-style').textContent;
+	const css = win.document.getElementById('jp-furigana-plus-style').textContent;
 	check(
 		/\.fg-line\.fg-word\s*\{[^}]*inline-block[^}]*padding-top:\s*var\(--fg-word-offset/.test(css),
 		'逐字宿主的让位量走 --fg-word-offset（量出来的，不是写死的），且加在每个词上'
