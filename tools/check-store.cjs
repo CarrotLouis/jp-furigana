@@ -1,6 +1,6 @@
 // Distribution checks shared by local development and CI. No network or writes.
 'use strict';
-const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), {createHash}=require('node:crypto');
 const root = path.resolve(__dirname, '..'), src = path.join(root, 'src');
 const m = JSON.parse(fs.readFileSync(path.join(src, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -13,6 +13,14 @@ assert.deepEqual(m.requirements, [], 'RNP remains an optional adapter');
 assert.equal(m.require_restart, true); assert(!m.native_plugin, 'No in-process native DLL');
 assert(fs.existsSync(path.join(root,'native/DesktopLyricsHost.cs')), 'Desktop helper source must accompany its binary');
 assert.equal(fs.readFileSync(path.join(src,'desktop-host.exe')).subarray(0,2).toString(),'MZ','Desktop renderer must be a Windows executable');
+const provenancePath=path.join(root,'native-build-info.json');
+if(fs.existsSync(provenancePath)){
+	const info=JSON.parse(fs.readFileSync(provenancePath,'utf8'));
+	const hash=(name,text=false)=>{const bytes=fs.readFileSync(path.join(root,name));return createHash('sha256').update(text?bytes.toString('utf8').replace(/\r\n/g,'\n'):bytes).digest('hex');};
+	assert.equal(hash('native/DesktopLyricsHost.cs',true),info.nativeSourceSha256,'Native source changed; update its Actions build provenance');
+	assert.equal(hash('tools/build-desktop-host.ps1',true),info.nativeBuildScriptSha256);
+	assert.equal(hash('src/desktop-host.exe'),info.nativeExecutableSha256,'Shipped native binary must match the recorded Actions artifact');
+}
 assert(/^[a-zA-Z0-9_-]+$/.test(m.slug)); assert(/^\d+\.\d+\.\d+$/.test(m.version));
 assert(!['force-install','force-update','force-uninstall'].some(k => m[k]), 'No forced market actions');
 const image = fs.statSync(path.join(src, m.preview)); assert(image.size <= 200 * 1024, 'Preview must stay small');

@@ -12,6 +12,7 @@
 - 注音间距先检查缓存与宿主是否仍连接，字体变化按有限频率探测；DOM 重建与设置变化使缓存失效。两处滑块 `input` 仅更新数值预览，`change` 才保存设置并重算；菜单刷新不覆盖待提交值。字形映射及外部核对的 LRC 解析复用文本核心。
 - `npm test`、语法检查、分发检查、六种 RNP / LyricBar DOM 场景与 30 项运行文件打包通过。Windows 透明组件重新编译、自测、实际回环 IPC / 生命周期通过，固定基线、居中、无注音留空、锁定穿透与透明解锁图标保持有效。
 - CI 保留上游 main 推送创建 `v<版本>` Release 及已有标签跳过，发布权限单独为 `contents: write`；发布等待 Linux 回归与 Windows 源码编译、自测。Fork / PR 只验证并提供 artifact，不自动发布独立版。
+- [GitHub Actions 构建 41176661209](https://github.com/CarrotLouis/jp-furigana/actions/runs/41176661209) 的 Linux 与 Windows 作业通过，fork 发布步骤跳过。已核对输入提交、源码及构建脚本哈希、编译组件、30 项包内文件；本版仓库中的桌面组件采用该 Actions 产物，来源记录为根目录 `native-build-info.json`。
 - 本轮未替用户安装或重启网易云，新编辑交互仍需用户客户端复测；未发送维护者回复，也未修改 Plus 商店条目。
 
 ## 1.6.2：按当前原歌词判断日语（2026-10-31）
