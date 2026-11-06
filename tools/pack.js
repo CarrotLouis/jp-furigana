@@ -37,6 +37,7 @@ const SRC_FILES = [
 	'rnp-settings.js',
 	'desktop.js',
 	'source-dialog.js',
+	'probe.js',
 	'desktop-host.exe',
 	'external-fetch.ps1',
 	'cache-write.ps1',

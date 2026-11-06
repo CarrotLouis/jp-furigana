@@ -4,7 +4,7 @@ const { JSDOM } = require('jsdom');
 const src = path.resolve(__dirname, '../src'), manifest = require('../src/manifest.json');
 async function fixture(conflict, late = false, desktopChoice) {
 	const dom = new JSDOM('<body><p id="original">原页面</p></body>', { url: 'https://music.163.com/', runScripts: 'outside-only', pretendToBeVisual: true });
-	const win = dom.window, handlers = {}, opened = [], legacy = JSON.stringify({ enabled: false, readingSource: 'dict', rtSize: 74, configVersion: 2,...(desktopChoice===undefined?{}:{desktopEnabled:desktopChoice}) });
+	const win = dom.window, handlers = {}, opened = [], legacy = JSON.stringify({ enabled: false, readingSource: 'dict', rtSize: 74, rtWeight: 'invalid', configVersion: 2,...(desktopChoice===undefined?{}:{desktopEnabled:desktopChoice}) });
 	const oldCore = {}, oldDictionary = {}, oldLoader = () => {}, oldApi = {};
 	win.FuriganaCore = oldCore; win.kuromoji = oldDictionary; win.__FURIGANA_DICT_LOADER__ = oldLoader;
 	win.loadedPlugins = conflict && !late ? { 'jp-furigana': { manifest: { slug: 'jp-furigana' } } } : {};
@@ -26,6 +26,7 @@ async function fixture(conflict, late = false, desktopChoice) {
 	} else {
 		assert(win.JPFuriganaPlus); assert(!win.JPFurigana);
 		assert.equal(win.JPFuriganaPlus.config.rtSize, 74, 'Copy earlier user settings once');
+		assert.equal(win.JPFuriganaPlus.config.rtWeight, '400', 'Invalid stored weights fall back to normal');
 		assert.equal(win.JPFuriganaPlus.config.desktopEnabled,desktopChoice===undefined?true:desktopChoice,'Desktop defaults on while preserving an explicitly saved choice');
 		assert.equal(win.JPFuriganaPlus.config.configVersion,3);
 		win.JPFuriganaPlus.set('rtSize', 81);

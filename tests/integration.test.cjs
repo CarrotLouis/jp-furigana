@@ -19,11 +19,11 @@ const dom = new JSDOM('<body><div id="root">' + (rnp ? '<div class="g-single" st
 const win = dom.window, handlers = {}, disk = new Map();
 win.TextEncoder = TextEncoder;
 let songId = '1', pending, requests = 0, failure = '';
-const settingActions = [], playActions = []; let rejectPlay = false;
-const metadata = { id: 1, name: '星の手紙', artists: [{ name: '試験歌手' }] };
+const settingActions = [], playActions = [], openedUrls = [], copied = []; let rejectPlay = false;
+const metadata = { id: 1, name: '星の手紙', artists: [{ name: '試験歌手' }, { name: '二番目の歌手' }] };
 win.document.getElementById('root').__reactContainer$test = { memoizedProps: { store: { getState: () => ({ playing: { resourceTrackId: songId, curTrack: { ...metadata, id: Number(songId) } }, setting: { showLyric: false } }), dispatch(action) { if(action.type==='async:action/doAction'){playActions.push(action);if(rejectPlay)return Promise.reject(new Error('mock playback rejected'));songId=action.payload.data.resource.id;}else settingActions.push(action); }, subscribe() {} } } };
 win.plugin = { pluginPath: src, devMode: false, onLoad: f => handlers.load = f, onConfig: f => handlers.config = f };
-win.betterncm = { app: { getBetterNCMVersion: async () => '1.3.4' }, ncm: { openUrl(url) { assert(!/^orpheus:/.test(url),'Playing a cached song must never invoke an OS protocol handler'); } }, fs: { exists: async () => true } };
+win.betterncm = { app: { getBetterNCMVersion: async () => '1.3.4', exec() { throw new Error('Manual browser navigation must not execute a process'); } }, ncm: { openUrl(url) { assert(!/^orpheus:/.test(url),'Playing a cached song must never invoke an OS protocol handler'); openedUrls.push(url); } }, fs: { exists: async () => true } };
 win.kuromojiFuriganaPlus = { builder: () => ({ build: cb => cb(null, { tokenize: text => {
 	const words = [['恋人', 'コイビト'], ['空', 'ソラ'], ['日', 'ヒ'], ['抗', 'アラガ'], ['沖動', 'オキドウ'], ['暗', 'アン'], ['彼', 'カレ'], ['包', 'ツツ'], ['終末','シュウマツ'], ['旗','キ'], ['送','ク'],['扉','トビラ'],['進','スス'],['君','キミ'],['声','コエ'],['星','ホシ'],['旋律','センリツ'],['響','ヒビ']];
 	const tokens = [];
@@ -46,13 +46,14 @@ win.FuriganaPlusExternal.browserTransport = () => ({
 		requests++;
 		if (failure === 'timeout') throw win.FuriganaPlusExternal.requestError({ curlCode: 28 });
 		if (failure === 'empty') return '';
+		if (failure === 'no-match') return '<table></table>';
 		assert.equal(new URL(url).hostname, 'utaten.com', 'UtaTen-only must never request Uta-Net');
 		if (url.includes('/search')) return '<table><tr><td class="searchResult__title"><a href="/lyric/test001/">星の手紙</a></td><td class="searchResult__artist"><p><a>試験歌手</a></p></td></tr></table>';
 		await new Promise(resolve => { pending = resolve; });
 		return '<h2 class="newLyricTitle__main">星の手紙<span>歌詞</span></h2><h3><a href="/artist/1">試験歌手</a></h3><div class="lyricBody"><div class="hiragana"><span class="ruby"><span class="rb">恋人</span><span class="rt">あなた</span></span>と<span class="ruby"><span class="rb">空</span><span class="rt">そら</span></span>をみる<br>' + [screenshot.html,weekend.html,alternates.html,...alternates.context.map(l=>l.html),inlineRuby.html,parentheses.mixed.html,parentheses.echo.html,katakanaSource.html].join('<br>') + '</div></div>';
 	}
 });
-win.localStorage.setItem('jp-furigana-plus.config', JSON.stringify({ readingSource: 'external', externalProvider: 'utaten' }));
+win.localStorage.setItem('jp-furigana-plus.config', JSON.stringify({ readingSource: 'external', externalProvider: 'utaten', externalConsent: true }));
 win.eval(fs.readFileSync(path.join(src, 'main.js'), 'utf8'));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn) { for (let n = 0; n < 100; n++) { if (fn()) return; await sleep(30); } throw new Error('Timed out waiting for plugin'); }
@@ -213,6 +214,19 @@ const assertScreenshot = (mode = 'hiragana') => {
 	await until(()=>sourceLine.querySelector('.fg-edit-custom')?.textContent==='ユメ');
 	assert.equal(sourceLine.querySelector('.fg-edit-original').textContent,'メロディ');
 	assert.equal(JSON.parse(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json')).userEdits[0].reading,'ユメ');
+	const beforePreview = disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json');
+	panel.querySelector('[data-a="cacheManager"]').click();
+	await until(() => win.document.querySelector('.fg-cache-row'));
+	[...win.document.querySelectorAll('.fg-cache-row button')].find(b => b.textContent === '查看').click();
+	await until(() => win.document.querySelector('.fg-cache-lyrics rt'));
+	const preview = win.document.querySelector('.fg-cache-lyrics'), previewReadings = () => [...preview.querySelectorAll('rt')].map(rt => rt.textContent);
+	const togglePreview = win.document.querySelector('[data-toggle-readings]');
+	assert(previewReadings().includes('メロディ')); assert(!previewReadings().includes('ユメ'));
+	assert(win.document.querySelector('.fg-cache-details h4').textContent.includes('人工纠音记录'));
+	togglePreview.click(); assert(previewReadings().includes('ユメ')); assert(!previewReadings().includes('メロディ'));
+	togglePreview.click(); assert(previewReadings().includes('メロディ'));
+	assert.equal(disk.get('C:/BetterNCM/lyrics/jp-furigana/1.json'), beforePreview);
+	win.document.querySelector('.fg-cache-manager [data-close]').click();
 	sourceWord().dispatchEvent(new win.MouseEvent('click',{bubbles:true}));assert.equal(win.document.querySelector('[data-reading]').value,'ユメ');
 	win.document.querySelector('[data-restore]').click();await until(()=>!sourceLine.querySelector('.fg-edit-custom'));
 	assert([...sourceLine.querySelectorAll('.fg-rt')].some(n=>n.textContent==='メロディ'));
@@ -222,6 +236,15 @@ const assertScreenshot = (mode = 'hiragana') => {
 	await until(() => readings().includes('アナタ'));
 	assertScreenshot('katakana');
 	assert.equal(requests, count, 'Kana style change reuses disk cache');
+	// 注音字重：默认 400，跟随歌词时用 inherit，且只改样式不重新获取
+	assert.equal(panel.querySelector('[data-k="rtWeight"]').value, '400');
+	win.JPFuriganaPlus.set('rtWeight', 'follow');
+	assert(win.document.getElementById('jp-furigana-plus-style').textContent.includes('font-weight: inherit'), 'Follow mode inherits the lyric font weight');
+	assert.equal(panel.querySelector('[data-k="rtWeight"]').value, 'follow');
+	win.JPFuriganaPlus.set('rtWeight', 700);
+	assert(win.document.getElementById('jp-furigana-plus-style').textContent.includes('font-weight: 700'));
+	assert.throws(() => win.JPFuriganaPlus.set('rtWeight', '900'), /无效的设置选项/);
+	assert.equal(requests, count, 'Weight changes never fetch lyrics');
 	win.JPFuriganaPlus.disable();
 	assert.equal(baseText(lyricLines()[0]), original);
 	assert.equal(baseText(lyricLines()[1]), screenshot.target);
@@ -258,9 +281,28 @@ const assertScreenshot = (mode = 'hiragana') => {
 	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().error.includes('空页面'));
 	assert.match(rnpMenu.querySelector('[data-status]').textContent, /空页面（HTTP 200）/);
 	assert(!rnpMenu.querySelector('[data-status]').textContent.includes('未找到同名歌曲'));
+	// A conclusive mismatch offers both fields in the normal and RNP menus.
+	failure = 'no-match'; panel.querySelector('[data-a="externalRetry"]').click();
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().error.includes('未找到同名歌曲'));
+	Object.defineProperty(win.navigator, 'clipboard', { value: { writeText: async text => copied.push(text) } });
+	const searchBoxes = [panel, rnpMenu].map(root => root.querySelector('[data-search-fallback]'));
+	for (const box of searchBoxes) {
+		assert(!box.hidden); assert.equal(box.querySelector('[data-title]').value,'星の手紙');
+		assert.equal(box.querySelector('[data-artist]').value,'試験歌手');
+	}
+	await searchBoxes[0].querySelector('[data-copy-title]').onclick();
+	await searchBoxes[1].querySelector('[data-copy-artist]').onclick();
+	const beforeBrowser = requests;
+	await searchBoxes[1].querySelector('[data-open-search]').onclick();
+	assert.deepEqual(copied,['星の手紙','試験歌手']);
+	assert.deepEqual(openedUrls,['https://utaten.com/search']);
+	assert.equal(requests,beforeBrowser,'Opening the site does not retry, submit or fetch lyrics');
+	failure = 'empty'; panel.querySelector('[data-a="externalRetry"]').click();
+	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().error.includes('空页面'));
 	// Retry countdown and the previous failure stay visible in the compact menu too.
 	win.JPFuriganaPlus.set('externalAutoRetry', 'failed');
 	await until(() => win.JPFuriganaPlus.externalStatus().waitingRetry);
+	assert(searchBoxes.every(box => box.hidden), 'A pending retry hides the manual-search action');
 	assert.match(rnpMenu.querySelector('[data-status]').textContent, /空页面.*\n?.*自动重试（1\/3）/);
 	win.JPFuriganaPlus.set('externalAutoRetry', 'off');
 	await until(() => !win.JPFuriganaPlus.externalStatus().loading);
@@ -269,13 +311,19 @@ const assertScreenshot = (mode = 'hiragana') => {
 	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().source === 'utaten');
 	assert.equal(win.JPFuriganaPlus.externalStatus().error, '');
 	assert(!rnpMenu.querySelector('[data-status]').textContent.includes('获取失败'));
+	assert(searchBoxes.every(box => box.hidden), 'A successful refresh hides the manual-search action');
 	// A cached source is used only for this load, without changing the user's global scope.
 	win.JPFuriganaPlus.set('externalProvider','auto');await until(()=>!win.JPFuriganaPlus.externalStatus().loading);
 	disk.set('C:/BetterNCM/lyrics/jp-furigana/1.json',JSON.stringify({schema:1,songId:'1',provider:'utanet',url:'https://www.uta-net.com/global/en/lyric/12/',title:'星の手紙',artists:['試験歌手'],lines:[{text:original,romaji:'ko i bi to to so ra wo mi ru'}]}));
 	const beforeCachedPlay=requests;panel.querySelector('[data-a="cacheManager"]').click();
 	await until(()=>win.document.querySelectorAll('.fg-cache-row').length===2);
-	const cachedRow=[...win.document.querySelectorAll('.fg-cache-row')].find(row=>row.querySelector('small').textContent.includes(' · 1 · '));
-	[...cachedRow.querySelectorAll('button')].find(button=>button.textContent==='播放并编辑').click();
+	const cachedRow = () => [...win.document.querySelectorAll('.fg-cache-row')].find(row => row.querySelector('small').textContent.includes(' · 1 · '));
+	[...cachedRow().querySelectorAll('button')].find(button => button.textContent === '查看').click();
+	await until(() => win.document.querySelector('.fg-cache-lyrics rt'));
+	assert([...win.document.querySelectorAll('.fg-cache-lyrics rt')].some(rt => rt.textContent === 'コイビト'),'Cached Uta-Net romaji is rendered as Japanese ruby');
+	assert.equal(requests,beforeCachedPlay);
+	[...win.document.querySelectorAll('.fg-cache-list button')].find(button => button.textContent === '返回列表').click();
+	[...cachedRow().querySelectorAll('button')].find(button=>button.textContent==='播放并编辑').click();
 	await until(()=>songId==='1'&&win.document.body.classList.contains('fg-edit-mode')&&win.JPFuriganaPlus.externalStatus().source==='utanet');
 	assert.equal(requests,beforeCachedPlay);assert.equal(win.JPFuriganaPlus.config.externalProvider,'auto');assert.equal(JSON.parse(win.localStorage.getItem('jp-furigana-plus.config')).externalProvider,'auto');
 	assert.equal(win.JPFuriganaPlus.externalStatus().settings.externalProvider,'utanet');

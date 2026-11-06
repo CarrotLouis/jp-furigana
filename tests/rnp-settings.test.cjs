@@ -7,7 +7,7 @@ const markup = '<div class="rnp-settings-menu"><div class="rnp-settings-menu-tab
 	'</div><div class="rnp-settings-menu-inner">' + ['appearance', 'lyric', 'font'].map(tab => '<div class="rnp-group" data-tab="' + tab + '"></div>').join('') + '</div></div>';
 const dom = new JSDOM('<body></body>', { pretendToBeVisual: true });
 const doc = dom.window.document, listeners = new Set();
-const config = { enabled: true, readingSource: 'external', externalProvider: 'auto', externalAutoRetry: 'failed', rtSize: 60, rtOpacity: 80, karaoke: true, onlyFirstLine: true, skipCredits: true, skipNoKanaLines: true, desktopEnabled:false, desktopInheritStyle:true, desktopTopmost:true, desktopTranslation:true, desktopFontSize:36 };
+const config = { enabled: true, readingSource: 'external', externalProvider: 'auto', externalAutoRetry: 'failed', rtSize: 60, rtOpacity: 80, rtWeight: '400', karaoke: true, onlyFirstLine: true, skipCredits: true, skipNoKanaLines: true, desktopEnabled:false, desktopInheritStyle:true, desktopTopmost:true, desktopTranslation:true, desktopFontSize:36 };
 let retries = 0, opens = 0,assignments=0;
 const api = { config: () => config, status: () => ({ text: '测试状态', canRetry: config.enabled, canOpen: true,canAssign:config.enabled&&config.externalProvider!=='utanet' }), subscribe: f => { listeners.add(f); return () => listeners.delete(f); },
 	set: (key, value) => { config[key] = value; for (const f of listeners) f(); }, retry: () => retries++, openSource: () => opens++,assignSource:()=>assignments++ };
@@ -21,7 +21,8 @@ const adapter = install(api, doc), tick = () => new Promise(resolve => setTimeou
 	assert.deepEqual([...inner.children].map(n => n.dataset.tab), ['appearance', 'lyric', 'jp-furigana-plus', 'font']);
 	const group = inner.querySelector('[data-tab="jp-furigana-plus"]');
 	assert.equal(group.querySelectorAll('[data-key]').length, 12); // Includes optional desktop controls and native style inheritance.
-	assert.equal(group.querySelectorAll('[data-choice]').length, 3);
+	assert.equal(group.querySelectorAll('[data-choice]').length, 4);
+	group.querySelector('[data-choice="rtWeight"] [data-value="follow"]').click(); assert.equal(config.rtWeight, 'follow');
 	assert(group.querySelector('[data-desktop-custom]').hidden);
 	assert(group.querySelector('[data-desktop-options]').hidden);
 	assert(!group.querySelector('[data-action="desktopSettings"],[data-action="desktopUnlock"]'),'RNP must not duplicate native desktop settings/unlock actions');

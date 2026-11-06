@@ -44,6 +44,9 @@
 				"file": "source-dialog.js"
 			},
 			{
+				"file": "probe.js"
+			},
+			{
 				"file": "main.js"
 			}
 		]
