@@ -3,21 +3,21 @@ const assert=require('node:assert/strict');
 const desktop=require('../src/desktop.js'),core=require('../src/furigana.js');
 const tick=()=>new Promise(r=>setTimeout(r,10));
 async function until(fn){for(let i=0;i<100;i++){if(fn())return;await tick();}throw Error('Desktop wait timed out');}
-function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
-	const subscribers=new Set(),native=new Set(),callbacks=new Map(),sessions=[],visibility=[],actions=[];
+function fixture({delay=false,fail=false,bridgeAvailable=true,slowRestore=false}={}){
+	const subscribers=new Set(),native=new Set(),callbacks=new Map(),sessions=[],visibility=[],actions=[],pageEvents=new Map();
 	const config={desktopEnabled:false,desktopInheritStyle:true,desktopFontSize:36,desktopTopmost:true,desktopTranslation:true,enabled:true,rtSize:60,rtOpacity:80,karaoke:true,skipCredits:true,skipNoKanaLines:true};
 	let data={songId:'1',playId:'1|play',nativeVisible:true,playing:true,locked:false,title:'試験曲',currentText:'空をみる',
 		style:desktop.nativeStyle({lyricFont:'微软雅黑',lyricFontSize:35,lyricMode:'translate',lyricColor:['eeeeee','eeeeee','ffdede','ffb0b0'],lyricOutLine:['999999','cb7474'],lyricFontOutlineEnabled:true,lyricLineMode:1}),
-		lines:[{time:1,text:'空をみる',translation:'看天空'},{time:4,text:'町へゆく',translation:'前往小镇'}]},reading='そら',resolutions=0,release;
+		lines:[{time:1,text:'空をみる',translation:'看天空'},{time:4,text:'町へゆく',translation:'前往小镇'}]},reading='そら',resolutions=0,release,finishRestore;
 	const nativeNotify=()=>{for(const fn of native)fn(true);};
 	const bridge={appendRegisterCall:(name,scope,fn)=>{const set=callbacks.get(name)||new Set();set.add(fn);callbacks.set(name,set);},removeRegisterCall:(name,scope,fn)=>callbacks.get(name).delete(fn)};
 	const existing=()=>{};bridge.appendRegisterCall('PlayProgress','audioplayer',existing);
 	const req={c:{original:{exports:{Bridge:bridge}}},m:{unrelated:()=>{throw Error('Do not execute unrelated modules');}}};
 	const jsonp=[];jsonp.push=item=>{const id=item[2][0][0];req.c[id]={exports:{}};req.m[id]=item[1][id];item[1][id]({},{},req);};
-	const win={webpackJsonp:bridgeAvailable?jsonp:[],setInterval,clearInterval,addEventListener(){},removeEventListener(){}};
+	const win={webpackJsonp:bridgeAvailable?jsonp:[],setInterval,clearInterval,addEventListener:(name,fn)=>pageEvents.set(name,fn),removeEventListener:name=>pageEvents.delete(name)};
 	const api={config:()=>config,set:(key,value)=>{config[key]=value;for(const fn of [...subscribers])fn();},
 		snapshot:()=>data,subscribe:fn=>{subscribers.add(fn);return()=>subscribers.delete(fn);},watch:fn=>{native.add(fn);return()=>native.delete(fn);},
-		visibility:async(hidden,restore=true)=>visibility.push({hidden,restore}),bounds:value=>config.desktopBounds=value,
+		visibility:async(hidden,restore=true)=>{visibility.push({hidden,restore});if(!hidden&&slowRestore)await new Promise(r=>finishRestore=r);},bounds:value=>config.desktopBounds=value,
 		readings:text=>{resolutions++;return[{text:text[0],rt:reading},{text:text.slice(1)}];},
 		skip:text=>config.skipCredits&&core.isCreditLine(text)||config.skipNoKanaLines&&!core.hasKana(text),
 		action:(type,value)=>{actions.push({type,value});if(type==='close'){data={...data,nativeVisible:false};nativeNotify();}},
@@ -30,7 +30,8 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 		}}};
 	const host=desktop.host(api,win);
 	return{api,host,config,sessions,visibility,actions,callbacks,existing,notify:()=>{for(const fn of subscribers)fn();},nativeNotify,
-		get data(){return data;},set data(value){data=value;},set reading(value){reading=value;},get resolutions(){return resolutions;},release:()=>release()};
+		get data(){return data;},set data(value){data=value;},set reading(value){reading=value;},get resolutions(){return resolutions;},release:()=>release(),
+		pageExit:name=>pageEvents.get(name)?.(),finishRestore:()=>finishRestore()};
 }
 (async()=>{
 	const settingsCalls=[],menuCallbacks=new Set(),menuBridge={appendRegisterCall:(name,scope,fn)=>{assert.equal(name,'menuclick');assert.equal(scope,'winhelper');menuCallbacks.add(fn);},removeRegisterCall:(name,scope,fn)=>menuCallbacks.delete(fn)};
@@ -48,6 +49,8 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	assert(split.vertical&&split.doubleLine);assert.equal(split.align,'split');
 	assert.deepEqual([0,2,3].map(lyricDoubleLineAlign=>desktop.nativeStyle({lyricLineMode:0,lyricDoubleLineAlign}).align),['center','left','right']);
 	assert.equal(desktop.nativeStyle({lyricLineMode:1,lyricOneLineAlign:3,lyricDoubleLineAlign:1}).align,'right');
+	assert.deepEqual(desktop.bounds({x:12,y:34,width:700,verticalHeight:566}),{x:12,y:34,width:700,verticalHeight:566});
+	assert.deepEqual(desktop.bounds({x:12,y:34,width:700}),{x:12,y:34,width:700},'Existing bounds do not require a vertical height');
 	const yrc='[1500,2000](1500,500,0)空(2000,1000,0)をみる';
 	const timed=desktop.attachWords([{time:1,text:'空 をみる'}],yrc,.5)[0];
 	assert.deepEqual(timed.words,[{from:0,to:1,start:1,end:1.5},{from:2,to:5,start:1.5,end:2.5}]);assert.equal(desktop.highlightTo(timed,1.4),1);assert.equal(desktop.highlightTo(timed,1.5),5);
@@ -104,7 +107,7 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	for(const fn of f.callbacks.get('Seek'))fn('1|play','seek',0,1);await until(()=>first.frames.at(-1).translation==='看天空');
 	f.data={...f.data,locked:true};f.nativeNotify();await until(()=>first.frames.at(-1).locked);
 	await first.emit({type:'unlock'});await until(()=>f.actions.some(a=>a.type==='unlock'));
-	await first.emit({type:'bounds',value:{x:12,y:34,width:700}});await until(()=>f.config.desktopBounds);assert.equal(f.config.desktopBounds.width,700);
+	await first.emit({type:'bounds',value:{x:12,y:34,width:700,verticalHeight:620}});await until(()=>f.config.desktopBounds);assert.equal(f.config.desktopBounds.verticalHeight,620);
 	f.api.set('desktopInheritStyle',false);f.api.set('desktopFontSize',54);f.api.set('desktopTranslation',false);await until(()=>first.frames.at(-1).fontSize===54);assert.equal(first.frames.at(-1).translation,'');
 	assert.equal(first.frames.at(-1).reserveSecondary,false,'Turning off secondary text releases its slot');
 	f.data={...f.data,style:{...f.data.style,vertical:true}};f.nativeNotify();await until(()=>first.frames.at(-1).style.vertical);
@@ -119,5 +122,9 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	const bad=fixture({fail:true});bad.api.set('desktopEnabled',true);await until(()=>!bad.config.desktopEnabled);assert.match(bad.host.inspect().status,/组件启动失败/);assert(!bad.visibility.some(v=>v.hidden));bad.host.dispose();
 	const race=fixture({delay:true});race.api.set('desktopEnabled',true);await until(()=>race.sessions.length);race.api.set('desktopEnabled',false);race.release();await until(()=>race.sessions[0].stopped);assert(!race.visibility.some(v=>v.hidden),'Late startup cannot hide the original window');race.host.dispose();
 	const nativeRace=fixture({delay:true});nativeRace.api.set('desktopEnabled',true);await until(()=>nativeRace.sessions.length);nativeRace.data={...nativeRace.data,nativeVisible:false};nativeRace.nativeNotify();nativeRace.release();await until(()=>nativeRace.sessions[0].stopped);assert(nativeRace.config.desktopEnabled);assert.equal(nativeRace.visibility.length,0,'Closing native lyrics during startup cancels without changing native visibility');nativeRace.host.dispose();
+	const leaving=fixture({slowRestore:true});leaving.api.set('desktopEnabled',true);await until(()=>leaving.host.inspect().ready);
+	leaving.pageExit('pagehide');await until(()=>leaving.sessions[0].stopped);
+	assert.deepEqual(leaving.visibility.at(-1),{hidden:false,restore:false},'Page exit stops the renderer without reopening the native window');
+	leaving.finishRestore();
 	console.log('Desktop passed: timeline/offsets, weight, live orientation, split alignment, shared readings, stable-frame caching, seeks, track races, lock/actions, native visibility and cancellation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

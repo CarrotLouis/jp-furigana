@@ -18,6 +18,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Microsoft.Win32.SafeHandles;
 
 namespace FuriganaPlusDesktop {
     static class Data {
@@ -179,12 +180,6 @@ namespace FuriganaPlusDesktop {
             public double Height,BaseWidth,RubyWidth;
             public bool Lyric,Secondary;
         }
-        double verticalHeightLimit=540,measuredHeight=double.PositiveInfinity;
-        public void LimitVerticalHeight(double value) {
-            value=Math.Max(24,value);
-            if(Math.Abs(verticalHeightLimit-value)<.5)return;
-            verticalHeightLimit=value;InvalidateMeasure();InvalidateVisual();
-        }
         static bool IsLatinPart(string part) {
             char c=part[0];
             return (c>='!'&&c<='~')||(c>='À'&&c<='ɏ')||c=='’'||c=='‘';
@@ -225,33 +220,31 @@ namespace FuriganaPlusDesktop {
             }
             return run;
         }
-        void AddVerticalColumns(List<VerticalColumn> columns,List<Unit> units,double limit,bool lyric,bool secondary,bool reserve=false) {
+        VerticalColumn MakeVerticalColumn(List<Unit> units,bool lyric,bool secondary) {
             double size=FontSize,rt=RubySize;
-            Func<VerticalColumn> start=()=>new VerticalColumn {BaseWidth=size*1.15,RubyWidth=lyric?rt*1.16+size*.1:0,Lyric=lyric,Secondary=secondary};
-            var column=start();
+            var column=new VerticalColumn {BaseWidth=size*1.15,RubyWidth=lyric?rt*1.16+size*.1:0,Lyric=lyric,Secondary=secondary};
             foreach(var unit in units){
-                if(unit.Text=="\r"||unit.Text=="\n"||unit.Text=="\r\n"){
-                    if(column.Units.Count>0){columns.Add(column);column=start();}
-                    continue;
-                }
                 var basis=MakeVerticalRun(unit.Text,size,false);
                 if(basis.Height==0)continue;
                 var ruby=unit.Reading.Length==0?null:MakeVerticalRun(unit.Reading,rt,true);
                 double height=ruby==null?basis.Height:Math.Max(basis.Height,ruby.Height)+size*.12;
-                if(column.Units.Count>0&&column.Height+height>limit){columns.Add(column);column=start();}
                 column.Units.Add(new VerticalUnit {Source=unit,Base=basis,Ruby=ruby,Height=height});
                 column.Height+=height;column.BaseWidth=Math.Max(column.BaseWidth,basis.Width);
                 if(ruby!=null)column.RubyWidth=Math.Max(column.RubyWidth,ruby.Width+size*.1);
             }
-            if(column.Units.Count>0||(reserve&&units.Count==0))columns.Add(column);
+            return column;
         }
-        void AddVerticalLine(List<VerticalColumn> columns,object source,string translation,double limit,bool secondary) {
-            int before=columns.Count;
-            AddVerticalColumns(columns,Units(source,true),limit,true,secondary);
-            if(columns.Count==before||string.IsNullOrWhiteSpace(translation)&&!Data.Bool(frame,"reserveSecondary"))return;
-            var units=new List<Unit>();int offset=0;
-            AddPlainUnits(units,translation.Trim(),ref offset,true);
-            AddVerticalColumns(columns,units,limit,false,secondary,true);
+        void AddVerticalLine(List<VerticalColumn> columns,object source,string translation,bool secondary) {
+            var lyric=MakeVerticalColumn(Units(source,true),true,secondary);
+            if(lyric.Units.Count==0)return;
+            if(!string.IsNullOrWhiteSpace(translation)||Data.Bool(frame,"reserveSecondary")){
+                var units=new List<Unit>();int offset=0;
+                AddPlainUnits(units,translation.Trim(),ref offset,true);
+                // Columns are placed right to left. Each translation is to
+                // the right of its source, beyond the source's ruby strip.
+                columns.Add(MakeVerticalColumn(units,false,secondary));
+            }
+            columns.Add(lyric);
         }
         void DrawVerticalRun(DrawingContext dc,VerticalRun run,double x,double y,bool outline,bool played) {
             foreach(var glyph in run.Glyphs){
@@ -272,28 +265,30 @@ namespace FuriganaPlusDesktop {
             dc.PushClip(new RectangleGeometry(new Rect(x-half,y-1,half*2,run.Height*fraction+1)));
             DrawVerticalRun(dc,run,x,y,outline,true);dc.Pop();
         }
-        double DrawVertical(DrawingContext dc,double width,double limit) {
+        double DrawVertical(DrawingContext dc,double width,double availableHeight) {
             var columns=new List<VerticalColumn>();
-            AddVerticalLine(columns,Data.Get(frame,"segments"),Data.Text(frame,"translation"),limit,false);
+            AddVerticalLine(columns,Data.Get(frame,"segments"),Data.Text(frame,"translation"),false);
             var next=Data.Object(frame,"next");
-            if(next.Count>0)AddVerticalLine(columns,Data.Get(next,"segments"),Data.Text(next,"translation"),limit,true);
+            if(next.Count>0)AddVerticalLine(columns,Data.Get(next,"segments"),Data.Text(next,"translation"),true);
             if(columns.Count==0)return 0;
             double gap=FontSize*.23,readingGap=FontSize*.1,height=0,totalWidth=gap*(columns.Count-1);
             foreach(var col in columns){height=Math.Max(height,col.Height);totalWidth+=col.BaseWidth+col.RubyWidth;}
+            // Keep each line in one column. Scale down only if the current
+            // window cannot fit it at the requested size.
+            double limit=Math.Max(1,availableHeight-7);
             double scale=Math.Min(1,Math.Min(Math.Max(1,width-4)/totalWidth,limit/height));
             if(dc!=null){
                 bool karaoke=Data.Bool(frame,"karaoke");
                 double highlight=Data.Number(frame,"highlightTo");
-                double right=totalWidth;
+                double right=totalWidth,alignHeight=double.IsPositiveInfinity(limit)?height:limit/scale;
                 dc.PushTransform(new TranslateTransform((width-totalWidth*scale)/2,2));
                 dc.PushTransform(new ScaleTransform(scale,scale));
                 foreach(var col in columns){
-                    // Read down, then continue in the column to the left. The
-                    // right-hand strip remains reserved even on pure-kana columns.
+                    // Reserve the right-hand ruby strip even on pure-kana columns.
                     double left=right-col.BaseWidth-col.RubyWidth;
                     double x=left+col.BaseWidth/2;
                     string align=LineAlign(col.Secondary);
-                    double y=align=="left"?0:align=="right"?height-col.Height:(height-col.Height)/2;
+                    double y=align=="left"?0:align=="right"?alignHeight-col.Height:(alignHeight-col.Height)/2;
                     foreach(var unit in col.Units){
                         double fraction=col.Lyric&&karaoke?unit.Base.Progress((int)Data.Clamp(highlight-unit.Source.From,0,unit.Source.Text.Length)):1;
                         DrawVerticalProgress(dc,unit.Base,x,y+(unit.Height-unit.Base.Height)/2,true,col.Secondary,fraction);
@@ -313,7 +308,7 @@ namespace FuriganaPlusDesktop {
         }
         double Layout(DrawingContext dc,double width,double availableHeight=double.PositiveInfinity) {
             double y;
-            if(IsVertical)y=DrawVertical(dc,width,Math.Max(24,Math.Min(verticalHeightLimit,availableHeight-7)));
+            if(IsVertical)y=DrawVertical(dc,width,availableHeight);
             else {
                 y=DrawLines(dc,Data.Get(frame,"segments"),Data.Text(frame,"translation"),0,width,false);
                 var next=Data.Object(frame,"next");if(next.Count>0)y=DrawLines(dc,Data.Get(next,"segments"),Data.Text(next,"translation"),y+6,width,true);
@@ -322,8 +317,8 @@ namespace FuriganaPlusDesktop {
             if(y==0 && message.Length>0) { var f=Format(message,Math.Min(FontSize,24));f.MaxTextWidth=Math.Max(20,width);f.TextAlignment=TextAlignment.Center;if(dc!=null)dc.DrawText(f,new Point(0,6));y=f.Height+16; }
             return Math.Max(24,y+5);
         }
-        protected override Size MeasureOverride(Size available) { double width=double.IsInfinity(available.Width)?860:Math.Max(80,available.Width);measuredHeight=available.Height;return new Size(width,Layout(null,width,measuredHeight)); }
-        protected override void OnRender(DrawingContext dc) { Layout(dc,Math.Max(80,ActualWidth),measuredHeight); }
+        protected override Size MeasureOverride(Size available) { double width=double.IsInfinity(available.Width)?860:Math.Max(80,available.Width);return new Size(width,Layout(null,width,available.Height)); }
+        protected override void OnRender(DrawingContext dc) { Layout(dc,Math.Max(80,ActualWidth),ActualHeight); }
     }
 
     // Original vector controls, using the client's native action names. No
@@ -368,8 +363,10 @@ namespace FuriganaPlusDesktop {
         [DllImport("user32.dll")] static extern bool TrackMouseEvent(ref MouseTracking tracking);
         public readonly LyricCanvas Canvas=new LyricCanvas();
         readonly WrapPanel tools=new WrapPanel { Orientation=Orientation.Horizontal, HorizontalAlignment=HorizontalAlignment.Center };
+        readonly RowDefinition lyricsRow=new RowDefinition {Height=GridLength.Auto};
         readonly Action<string,object> action; readonly Button play; readonly DispatcherTimer leaveTimer;
         readonly Border toolbar,hoverFrame; IntPtr handle; bool locked,closing,rendering,closingRequested,manipulating,chromeVisible,trackingBorder;
+        double verticalHeight;
         readonly Window unlockWindow;readonly Button unlockButton;readonly DispatcherTimer lockHover;
         public const double HideDelayMilliseconds=2000;
         public bool Locked { get { return locked; } }
@@ -377,7 +374,7 @@ namespace FuriganaPlusDesktop {
             action=send;Title="日语歌词振假名 Plus · 桌面歌词";WindowStyle=WindowStyle.None;AllowsTransparency=true;Background=Brushes.Transparent;
             ShowInTaskbar=false;ShowActivated=false;Topmost=true;ResizeMode=ResizeMode.CanResize;SizeToContent=SizeToContent.Height;Template=FramelessTemplate();
             Width=900;MinWidth=240;MaxWidth=SystemParameters.VirtualScreenWidth;MinHeight=60;
-            var grid=new Grid {Margin=new Thickness(8,0,8,8),Background=Brushes.Transparent};grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto,MinHeight=32});grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});
+            var grid=new Grid {Margin=new Thickness(8,0,8,8),Background=Brushes.Transparent};grid.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto,MinHeight=32});grid.RowDefinitions.Add(lyricsRow);
             toolbar=new Border {Background=Brushes.Transparent,HorizontalAlignment=HorizontalAlignment.Center,Child=tools,Visibility=Visibility.Hidden};
             Add("detail","打开当前歌曲播放页",()=>action("detail",null));Add("offset_back","歌词延后 0.5 秒",()=>action("offset_back",null));Add("offset_forward","歌词提前 0.5 秒",()=>action("offset_forward",null));
             Add("playprev","上一首",()=>action("playprev",null));play=Add("play_pause","播放 / 暂停",()=>action("play_pause",null));Add("playnext","下一首",()=>action("playnext",null));
@@ -398,12 +395,12 @@ namespace FuriganaPlusDesktop {
             Canvas.MouseLeftButtonDown+=(s,e)=>{if(!locked){SetManipulating(true);try{DragMove();SaveBounds();}catch(InvalidOperationException){}finally{SetManipulating(false);}}};
             PreviewMouseWheel+=(s,e)=>{if(locked)return;if((Keyboard.Modifiers&ModifierKeys.Control)!=0)action("fontSize",Canvas.FontSize+(e.Delta>0?1:-1));else action(e.Delta>0?"offset_back":"offset_forward",null);e.Handled=true;};
             SourceInitialized+=(s,e)=>{handle=new WindowInteropHelper(this).Handle;SetWindowLong(handle,GWL_EXSTYLE,GetWindowLong(handle,GWL_EXSTYLE)|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|(locked?WS_EX_TRANSPARENT:0));HwndSource.FromHwnd(handle).AddHook(ResizeHitTest);};
-            SizeChanged+=(s,e)=>{if(Canvas.IsVertical){RefreshVerticalHeight();KeepVerticalOnScreen();}if(!rendering)SaveBounds();};Closing+=(s,e)=>{if(!closing){e.Cancel=true;closingRequested=true;Hide();action("close",null);}};
+            SizeChanged+=(s,e)=>{if(Canvas.IsVertical)KeepVerticalOnScreen();if(!rendering&&!manipulating)SaveBounds();};Closing+=(s,e)=>{if(!closing){e.Cancel=true;closingRequested=true;Hide();action("close",null);}};
         }
         static ControlTemplate FramelessTemplate(){var template=new ControlTemplate(typeof(Window));var presenter=new FrameworkElementFactory(typeof(ContentPresenter));presenter.SetValue(ContentPresenter.ContentProperty,new TemplateBindingExtension(ContentControl.ContentProperty));template.VisualTree=presenter;return template;}
         IntPtr ResizeHitTest(IntPtr hwnd,int msg,IntPtr wp,IntPtr lp,ref bool handled){
             if(msg==0x231&&!locked){SetManipulating(true);return IntPtr.Zero;}
-            if(msg==0x232){SetManipulating(false);if(Canvas.IsVertical){RefreshVerticalHeight();KeepVerticalOnScreen();}SaveBounds();return IntPtr.Zero;}
+            if(msg==0x232){SetManipulating(false);if(Canvas.IsVertical)KeepVerticalOnScreen();SaveBounds();return IntPtr.Zero;}
             if(msg==0xa0&&!locked){SetHover(true);leaveTimer.Stop();if(!trackingBorder){var tracking=new MouseTracking {Size=Marshal.SizeOf(typeof(MouseTracking)),Flags=0x12,Window=handle};trackingBorder=TrackMouseEvent(ref tracking);}}
             if(msg==0x2a2){trackingBorder=false;StartHideDelay();}
             if(msg!=0x84||locked)return IntPtr.Zero;long packed=lp.ToInt64();var p=PointFromScreen(new Point((short)(packed&0xffff),(short)((packed>>16)&0xffff)));int hit=0;
@@ -428,11 +425,20 @@ namespace FuriganaPlusDesktop {
             var end=PointFromScreen(new Point(info.Work.Right,info.Work.Bottom));
             return new Rect(Left+start.X,Top+start.Y,end.X-start.X,end.Y-start.Y);
         }
-        void RefreshVerticalHeight() {
-            double chrome=Math.Max(32,toolbar.ActualHeight)+12;
-            double limit=Math.Min(540,WorkArea().Height-chrome);
-            if(SizeToContent==SizeToContent.Manual&&ActualHeight>0)limit=Math.Min(limit,ActualHeight-chrome);
-            Canvas.LimitVerticalHeight(limit);
+        void SetOrientation(bool vertical,IDictionary<string,object> bounds) {
+            if(vertical==Canvas.IsVertical)return;
+            if(vertical){
+                var area=WorkArea();
+                if(verticalHeight<=0)verticalHeight=Data.Number(bounds,"verticalHeight",area.Height*.82);
+                lyricsRow.Height=new GridLength(1,GridUnitType.Star);
+                SizeToContent=SizeToContent.Manual;
+                Height=Data.Clamp(verticalHeight,MinHeight,Math.Max(MinHeight,area.Height));
+            }else{
+                if(ActualHeight>0)verticalHeight=ActualHeight;
+                lyricsRow.Height=GridLength.Auto;
+                Height=double.NaN;
+                SizeToContent=SizeToContent.Height;
+            }
         }
         void KeepVerticalOnScreen() {
             if(!IsVisible||manipulating)return;
@@ -440,7 +446,11 @@ namespace FuriganaPlusDesktop {
             if(Left+ActualWidth>work.Left&&Left<work.Right&&Top>=work.Top&&Top<work.Bottom&&Top+ActualHeight>work.Bottom)
                 Top=Math.Max(work.Top,work.Bottom-ActualHeight);
         }
-        void SaveBounds() { if(IsLoaded)action("bounds",new {x=Left,y=Top,width=Width}); }
+        void SaveBounds() {
+            if(!IsLoaded)return;
+            if(Canvas.IsVertical&&ActualHeight>0)verticalHeight=ActualHeight;
+            action("bounds",new {x=Left,y=Top,width=Width,verticalHeight=verticalHeight>0?(double?)verticalHeight:null});
+        }
         public void SetLocked(bool value) { if(locked==value)return;locked=value;if(handle!=IntPtr.Zero){int style=GetWindowLong(handle,GWL_EXSTYLE);SetWindowLong(handle,GWL_EXSTYLE,value?style|WS_EX_TRANSPARENT:style&~WS_EX_TRANSPARENT);}if(value){leaveTimer.Stop();SetHover(false);ResizeMode=ResizeMode.NoResize;lockHover.Start();}else{ResizeMode=ResizeMode.CanResize;lockHover.Stop();unlockWindow.Hide();SetHover(true);StartHideDelay();} }
         void ShowUnlockHandle(){if(unlockWindow.Owner==null&&IsVisible)unlockWindow.Owner=this;unlockWindow.Topmost=Topmost;unlockWindow.Left=Left+(ActualWidth-unlockWindow.Width)/2;unlockWindow.Top=Top+1;if(!unlockWindow.IsVisible)unlockWindow.Show();}
         public void TestUnlockClick(){ShowUnlockHandle();unlockButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));}
@@ -461,8 +471,7 @@ namespace FuriganaPlusDesktop {
                 var bounds=Data.Object(frame,"bounds");
                 if(!IsVisible && bounds.Count>0){var work=SystemParameters.WorkArea;Width=Data.Clamp(Data.Number(bounds,"width",900),240,Math.Max(240,work.Width));Left=Data.Clamp(Data.Number(bounds,"x",work.Left+(work.Width-Width)/2),SystemParameters.VirtualScreenLeft,SystemParameters.VirtualScreenLeft+SystemParameters.VirtualScreenWidth-100);Top=Data.Clamp(Data.Number(bounds,"y",work.Bottom-230),SystemParameters.VirtualScreenTop,SystemParameters.VirtualScreenTop+SystemParameters.VirtualScreenHeight-60);}
                 bool vertical=Data.Bool(Data.Object(frame,"style"),"vertical");
-                if(vertical!=Canvas.IsVertical)SizeToContent=SizeToContent.Height;
-                if(vertical)RefreshVerticalHeight();
+                SetOrientation(vertical,bounds);
                 SetLocked(Data.Bool(frame,"locked"));Canvas.SetFrame(frame);if(!IsVisible)Show();
                 if(vertical)KeepVerticalOnScreen();
             }finally{rendering=false;}
@@ -470,10 +479,58 @@ namespace FuriganaPlusDesktop {
         public void Shutdown() { closing=true;leaveTimer.Stop();lockHover.Stop();unlockWindow.Close();Close(); }
     }
 
+    sealed class PlayerProcess : WaitHandle {
+        const uint Synchronize=0x00100000,InsufficientBuffer=122;
+        const int IPv4=2,OwnerPidListener=3;
+        [DllImport("iphlpapi.dll")] static extern uint GetExtendedTcpTable(IntPtr table,ref int size,bool sort,int family,int type,uint reserved);
+        [DllImport("kernel32.dll",SetLastError=true)] static extern SafeWaitHandle OpenProcess(uint access,bool inherit,int pid);
+        [StructLayout(LayoutKind.Sequential)] struct TcpRow {
+            public uint State,Address,Port,RemoteAddress,RemotePort;
+            public int Pid;
+        }
+        PlayerProcess(SafeWaitHandle handle){SafeWaitHandle=handle;}
+        static int FindListener(int port){
+            int size=0;
+            for(int attempt=0;attempt<3;attempt++){
+                int capacity=size;
+                if(capacity<0||capacity>16*1024*1024)return 0;
+                IntPtr buffer=capacity==0?IntPtr.Zero:Marshal.AllocHGlobal(capacity);
+                try{
+                    uint result=GetExtendedTcpTable(buffer,ref size,false,IPv4,OwnerPidListener,0);
+                    if(result==InsufficientBuffer)continue;
+                    if(result!=0||capacity<4)return 0;
+                    int count=Marshal.ReadInt32(buffer),rowSize=Marshal.SizeOf(typeof(TcpRow));
+                    if(count<0||count>(capacity-4)/rowSize)return 0;
+                    uint loopback=BitConverter.ToUInt32(IPAddress.Loopback.GetAddressBytes(),0);
+                    for(int i=0;i<count;i++){
+                        var row=(TcpRow)Marshal.PtrToStructure(IntPtr.Add(buffer,4+i*rowSize),typeof(TcpRow));
+                        if(row.Address==loopback&&(ushort)IPAddress.NetworkToHostOrder(unchecked((short)row.Port))==port)return row.Pid;
+                    }
+                    return 0;
+                }finally{if(buffer!=IntPtr.Zero)Marshal.FreeHGlobal(buffer);}
+            }
+            return 0;
+        }
+        public static PlayerProcess TryOpen(int port){
+            if(port<=0||port>65535)return null;
+            int pid=FindListener(port);
+            if(pid<=0)return null;
+            var handle=OpenProcess(Synchronize,false,pid);
+            if(handle.IsInvalid){handle.Dispose();return null;}
+            // Hold the specific process object. A new process reusing a PID
+            // cannot extend the lifetime of this renderer.
+            var process=new PlayerProcess(handle);
+            if(process.WaitOne(0)||FindListener(port)!=pid){process.Dispose();return null;}
+            return process;
+        }
+    }
+
     sealed class LocalServer : IDisposable {
         readonly TcpListener listener=new TcpListener(IPAddress.Loopback,0); readonly string token;
         readonly Queue<object> events=new Queue<object>();readonly AutoResetEvent signal=new AutoResetEvent(false);readonly Action<IDictionary<string,object>> frame;readonly Action stop;
-        volatile bool disposed; public DateTime LastSeen=DateTime.UtcNow;public int Port {get{return ((IPEndPoint)listener.LocalEndpoint).Port;}}
+        volatile bool disposed; long lastSeen=Stopwatch.GetTimestamp();public int Port {get{return ((IPEndPoint)listener.LocalEndpoint).Port;}}
+        public bool IsIdle(int seconds){return Stopwatch.GetTimestamp()-Interlocked.Read(ref lastSeen)>seconds*Stopwatch.Frequency;}
+        void Touch(){Interlocked.Exchange(ref lastSeen,Stopwatch.GetTimestamp());}
         public LocalServer(string secret,Action<IDictionary<string,object>> setFrame,Action shutdown){token=secret;frame=setFrame;stop=shutdown;listener.Start(8);ThreadPool.QueueUserWorkItem(_=>Accept());}
         public void Send(string type,object value){lock(events){if(events.Count<64)events.Enqueue(new {type=type,value=value});}signal.Set();}
         void Accept(){while(!disposed)try{var client=listener.AcceptTcpClient();ThreadPool.QueueUserWorkItem(_=>Serve(client));}catch(SocketException){if(!disposed)Thread.Sleep(50);}catch(ObjectDisposedException){return;}}
@@ -483,23 +540,25 @@ namespace FuriganaPlusDesktop {
             string[] lines=Encoding.ASCII.GetString(header.ToArray()).Split(new[]{"\r\n"},StringSplitOptions.None);string[] request=lines[0].Split(' ');if(request.Length!=3)return;
             var uri=new Uri("http://127.0.0.1"+request[1]);
             if(request[0]=="OPTIONS"){Reply(stream,200,"{}");return;}
-            if(uri.Query!="?token="+token){Reply(stream,403,"{}");return;}LastSeen=DateTime.UtcNow;
+            if(uri.Query!="?token="+token){Reply(stream,403,"{}");return;}
             if(request[0]=="GET"&&uri.AbsolutePath=="/events"){
+                Touch();
                 bool empty;lock(events)empty=events.Count==0;if(empty)signal.WaitOne(1000);
                 var batch=new List<object>();lock(events){while(events.Count>0)batch.Add(events.Dequeue());}Reply(stream,200,Data.Json.Serialize(new {events=batch}));return;
             }
-            if(request[0]=="GET"&&uri.AbsolutePath=="/health"){var process=Process.GetCurrentProcess();Reply(stream,200,Data.Json.Serialize(new {version="1.6.3",workingSetBytes=process.WorkingSet64,privateBytes=process.PrivateMemorySize64,cpuMilliseconds=process.TotalProcessorTime.TotalMilliseconds}));return;}
+            if(request[0]=="GET"&&uri.AbsolutePath=="/health"){using(var process=Process.GetCurrentProcess())Reply(stream,200,Data.Json.Serialize(new {version="1.6.3",workingSetBytes=process.WorkingSet64,privateBytes=process.PrivateMemorySize64,cpuMilliseconds=process.TotalProcessorTime.TotalMilliseconds}));return;}
             if(request[0]!="POST"){Reply(stream,404,"{}");return;}
             int length=0;foreach(string h in lines){if(h.StartsWith("Transfer-Encoding:",StringComparison.OrdinalIgnoreCase)){Reply(stream,400,"{}");return;}if(h.StartsWith("Content-Length:",StringComparison.OrdinalIgnoreCase))int.TryParse(h.Substring(15).Trim(),out length);}
             if(length<0||length>524288){Reply(stream,413,"{}");return;}var body=new byte[length];for(int at=0;at<length;){int n=stream.Read(body,at,length-at);if(n<=0)return;at+=n;}
-            if(uri.AbsolutePath=="/frame"){var value=Data.Json.DeserializeObject(Encoding.UTF8.GetString(body)) as IDictionary<string,object>;if(value==null){Reply(stream,400,"{}");return;}frame(value);Reply(stream,200,"{\"ok\":true}");}
-            else if(uri.AbsolutePath=="/stop"){Reply(stream,200,"{\"ok\":true}");stop();}else Reply(stream,404,"{}");
+            if(uri.AbsolutePath=="/frame"){var value=Data.Json.DeserializeObject(Encoding.UTF8.GetString(body)) as IDictionary<string,object>;if(value==null){Reply(stream,400,"{}");return;}Touch();frame(value);Reply(stream,200,"{\"ok\":true}");}
+            else if(uri.AbsolutePath=="/stop"){try{Reply(stream,200,"{\"ok\":true}");}finally{stop();}}else Reply(stream,404,"{}");
         }catch(IOException){}catch(SocketException){}catch(ArgumentException){}catch(ObjectDisposedException){} }
         static void Reply(Stream stream,int status,string json){byte[] body=Encoding.UTF8.GetBytes(json),head=Encoding.ASCII.GetBytes("HTTP/1.1 "+status+" Result\r\nContent-Type: application/json; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: "+body.Length+"\r\n\r\n");stream.Write(head,0,head.Length);stream.Write(body,0,body.Length);}
         public void Dispose(){disposed=true;listener.Stop();signal.Set();}
     }
 
     static class Program {
+        static void RemoveReady(string file){if(file!=null)try{File.Delete(file);}catch(IOException){}catch(UnauthorizedAccessException){}}
         [STAThread] static int Main(string[] args) {
             // Lyrics change a few times per line. Software rendering avoids a
             // dedicated GPU/D3D context for an otherwise idle transparent window.
@@ -507,20 +566,43 @@ namespace FuriganaPlusDesktop {
             if(args.Length==2&&args[0]=="--render")return RenderSample(args[1]);
             if(args.Length==2&&args[0]=="--self-test")return SelfTest(args[1]);
             if(args.Length!=1)return 2;string ready=null;LocalServer server=null;
+            PlayerProcess owner=null;RegisteredWaitHandle ownerWait=null;
+            Timer watchdog=null,exitDeadline=null;int stopping=0;
             try {
                 var cfg=Data.Json.DeserializeObject(Encoding.UTF8.GetString(Convert.FromBase64String(args[0]))) as IDictionary<string,object>;
                 string token=Data.Text(cfg,"token");if(token.Length!=32||!System.Text.RegularExpressions.Regex.IsMatch(token,"^[a-f0-9]{32}$"))return 2;
-                ready=Path.GetFullPath(Data.Text(cfg,"ready"));if(Path.GetFileName(ready)!="desktop-"+token+".json"||!Directory.Exists(Path.GetDirectoryName(ready))||File.Exists(ready))return 2;
+                string readyPath=Path.GetFullPath(Data.Text(cfg,"ready"));
+                if(Path.GetFileName(readyPath)!="desktop-"+token+".json"||!Directory.Exists(Path.GetDirectoryName(readyPath))||File.Exists(readyPath))return 2;
+                ready=readyPath;
+                double port=Data.Number(cfg,"ownerPort");
+                owner=PlayerProcess.TryOpen(port>0&&port<=65535?(int)port:0);
                 var app=new Application {ShutdownMode=ShutdownMode.OnExplicitShutdown};LyricsWindow window=null;
-                Action shutdown=()=>app.Dispatcher.BeginInvoke(new Action(()=>{if(window!=null)window.Shutdown();app.Shutdown();}));
-                server=new LocalServer(token,value=>app.Dispatcher.BeginInvoke(new Action(()=>window.Apply(value))),shutdown);
+                Action shutdown=()=>{
+                    if(Interlocked.Exchange(ref stopping,1)!=0)return;
+                    // If a native drag/resize has blocked the dispatcher, the
+                    // process must still exit and release its running image.
+                    exitDeadline=new Timer(_=>{RemoveReady(ready);Environment.Exit(0);},null,1500,Timeout.Infinite);
+                    app.Dispatcher.BeginInvoke(DispatcherPriority.Send,new Action(()=>{try{window.Shutdown();}finally{app.Shutdown();}}));
+                };
+                server=new LocalServer(token,value=>app.Dispatcher.BeginInvoke(new Action(()=>{
+                    if(Volatile.Read(ref stopping)==0)window.Apply(value);
+                })),shutdown);
                 window=new LyricsWindow((type,value)=>server.Send(type,value));
                 if(Data.Bool(cfg,"offscreenTest")){window.Left=-10000;window.Top=-10000;}
-                var watchdog=new DispatcherTimer {Interval=TimeSpan.FromSeconds(2)};watchdog.Tick+=(s,e)=>{if(DateTime.UtcNow-server.LastSeen>TimeSpan.FromSeconds(15))shutdown();};watchdog.Start();
-                File.WriteAllText(ready,Data.Json.Serialize(new {protocol=1,version="1.6.3",port=server.Port,token=token,pid=Process.GetCurrentProcess().Id}),new UTF8Encoding(false));
-                app.Run();watchdog.Stop();return 0;
+                if(owner!=null)ownerWait=ThreadPool.RegisterWaitForSingleObject(owner,(_,timedOut)=>shutdown(),null,Timeout.Infinite,true);
+                watchdog=new Timer(_=>{if(server.IsIdle(10))shutdown();},null,1000,1000);
+                using(var process=Process.GetCurrentProcess())File.WriteAllText(ready,Data.Json.Serialize(new {protocol=2,version="1.6.3",port=server.Port,token=token,pid=process.Id,ownerBound=owner!=null}),new UTF8Encoding(false));
+                app.Run();return 0;
             }catch(Exception e){if(ready!=null)try{File.WriteAllText(ready+".error",e.GetType().Name+": "+e.Message);}catch{}return 1;}
-            finally{if(server!=null)server.Dispose();if(ready!=null&&File.Exists(ready))File.Delete(ready);}
+            finally{
+                Interlocked.Exchange(ref stopping,1);
+                if(ownerWait!=null)ownerWait.Unregister(null);
+                if(owner!=null)owner.Dispose();
+                if(watchdog!=null)watchdog.Dispose();
+                if(exitDeadline!=null)exitDeadline.Dispose();
+                if(server!=null)server.Dispose();
+                RemoveReady(ready);
+            }
         }
         static int SelfTest(string directory) {
             Directory.CreateDirectory(directory);
@@ -539,12 +621,13 @@ namespace FuriganaPlusDesktop {
                 frame["karaoke"]=true;frame["highlightTo"]=0;var unplayed=RenderCanvas(frame);frame["highlightTo"]=5;var played=RenderCanvas(frame);bool karaoke=InkDifference(unplayed,played)>300;
                 bool stableBaseline,stableHeight,emptySecondarySlot;double textCenterError;LayoutChecks(out stableBaseline,out stableHeight,out emptySecondarySlot,out textCenterError);
                 bool horizontalWeight=RubyWeightCheck(false),verticalWeight=RubyWeightCheck(true);
-                bool rightRuby,verticalSlot,columnsRightToLeft,verticalProgress,splitAlignment;
-                CompositionChecks(out rightRuby,out verticalSlot,out columnsRightToLeft,out verticalProgress,out splitAlignment);
+                bool rightRuby,verticalSlot,translationRight,verticalProgress,splitAlignment;
+                CompositionChecks(out rightRuby,out verticalSlot,out translationRight,out verticalProgress,out splitAlignment);
+                bool verticalResize=VerticalResizeCheck(window);
                 bool passed=window.AllowsTransparency&&(locked&0x80000)!=0&&(locked&0x20)!=0&&(unlocked&0x20)==0&&unlockAction&&unlockCentered&&unlockAboveLyrics&&unlockTransparent&&hoverBounds&&hoverAcrossFrames&&resizeBounds&&opacity&&readingSize&&karaoke&&stableBaseline&&stableHeight&&emptySecondarySlot&&textCenterError<=1&&clear>ink&&ink>300
-                    &&horizontalWeight&&verticalWeight&&rightRuby&&verticalSlot&&columnsRightToLeft&&verticalProgress&&splitAlignment;
+                    &&horizontalWeight&&verticalWeight&&rightRuby&&verticalSlot&&translationRight&&verticalResize&&verticalProgress&&splitAlignment;
                 File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=passed,transparentPixels=clear,inkPixels=ink,layered=(locked&0x80000)!=0,lockedClickThrough=(locked&0x20)!=0,unlockedInteractive=(unlocked&0x20)==0,unlockHandle=unlockAction,unlockCentered,unlockAboveLyrics,unlockTransparent,hoverBounds,hoverAcrossFrames,resizeBounds,opacity,readingSize,karaoke,stableBaseline,stableHeight,emptySecondarySlot,textCenterError,width=image.PixelWidth,height=image.PixelHeight,
-                    horizontalWeight,verticalWeight,rightRuby,verticalSlot,columnsRightToLeft,verticalProgress,splitAlignment}),new UTF8Encoding(false));
+                    horizontalWeight,verticalWeight,rightRuby,verticalSlot,translationRight,verticalResize,verticalProgress,splitAlignment}),new UTF8Encoding(false));
                 window.Shutdown();app.Shutdown();return passed?0:1;
             }catch(Exception e){File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=false,error=e.ToString()}));return 1;}
         }
@@ -580,7 +663,7 @@ namespace FuriganaPlusDesktop {
             }
             return right<0?Rect.Empty:new Rect(left,top,right-left+1,bottom-top+1);
         }
-        static void CompositionChecks(out bool rightRuby,out bool stableSlot,out bool rightToLeft,out bool verticalProgress,out bool splitAlignment){
+        static void CompositionChecks(out bool rightRuby,out bool stableSlot,out bool translationRight,out bool verticalProgress,out bool splitAlignment){
             var frame=TestFrame("{\"fontSize\":36,\"rtSize\":50,\"rtOpacity\":20,\"segments\":[{\"text\":\"雨\",\"rt\":\"あめ\"},{\"text\":\"の日\"}],\"style\":{\"vertical\":true,\"colorTop\":\"#ff4444\",\"colorBottom\":\"#ff4444\",\"unplayedColorTop\":\"#448aff\",\"unplayedColorBottom\":\"#448aff\"}}");
             Func<byte,byte,byte,bool> any=(r,g,b)=>true, red=(r,g,b)=>r>b+60, blue=(r,g,b)=>b>r+60;
             var body=InkBounds(RenderCanvas(frame),any);
@@ -592,14 +675,13 @@ namespace FuriganaPlusDesktop {
             stableSlot=!body.IsEmpty&&!withoutRuby.IsEmpty&&Math.Abs(withoutRuby.Left-body.Left)<=1&&Math.Abs(withoutRuby.Right-body.Right)<=1;
 
             var style=Data.Object(frame,"style");
-            frame["segments"]=TestFrame("{\"line\":[{\"text\":\"雨雨雨雨雨雨雨雨\"}]}")["line"];
-            frame["karaoke"]=true;frame["highlightTo"]=4;
-            var wrapped=RenderCanvas(frame,260,177);
-            var first=InkBounds(wrapped,red);var second=InkBounds(wrapped,blue);
-            rightToLeft=!first.IsEmpty&&!second.IsEmpty&&first.Left>second.Right&&wrapped.PixelHeight<=177;
+            frame["translation"]="雨天";frame["karaoke"]=true;frame["highlightTo"]=0;
+            var bilingual=RenderCanvas(frame);
+            var first=InkBounds(bilingual,blue);var second=InkBounds(bilingual,red);
+            translationRight=!first.IsEmpty&&!second.IsEmpty&&first.Right<second.Left;
 
             frame["segments"]=TestFrame("{\"line\":[{\"text\":\"雨空\",\"rt\":\"あまぞら\"}]}")["line"];
-            frame["highlightTo"]=1;
+            frame["highlightTo"]=1;frame["translation"]="";
             var partial=RenderCanvas(frame);
             first=InkBounds(partial,red);second=InkBounds(partial,blue);
             verticalProgress=!first.IsEmpty&&!second.IsEmpty&&first.Top<second.Top&&first.Bottom<=second.Top+2;
@@ -611,11 +693,31 @@ namespace FuriganaPlusDesktop {
             first=InkBounds(split,red);second=InkBounds(split,blue);
             splitAlignment=!first.IsEmpty&&!second.IsEmpty&&first.Left<4&&second.Right>split.PixelWidth-4&&first.Right<second.Left&&first.Bottom<second.Top;
         }
+        static bool VerticalResizeCheck(LyricsWindow window){
+            var frame=TestFrame("{\"fontSize\":36,\"karaoke\":true,\"highlightTo\":9,\"bounds\":{\"verticalHeight\":220},\"style\":{\"vertical\":true,\"colorTop\":\"#ff4444\",\"colorBottom\":\"#ff4444\",\"unplayedColorTop\":\"#448aff\",\"unplayedColorBottom\":\"#448aff\"}}");
+            frame["segments"]=new object[]{new Dictionary<string,object>{{"text",new string('雨',18)}}};
+            Func<byte,byte,byte,bool> any=(r,g,b)=>true,red=(r,g,b)=>r>b+60,blue=(r,g,b)=>b>r+60;
+            window.Apply(frame);window.UpdateLayout();
+            double smallHeight=window.Canvas.ActualHeight;
+            int width=(int)window.Canvas.ActualWidth;
+            var small=RenderCanvas(frame,width,smallHeight);
+            var top=InkBounds(small,red);var bottom=InkBounds(small,blue);
+            bool single=!top.IsEmpty&&!bottom.IsEmpty&&Math.Abs(top.Left-bottom.Left)<=1&&Math.Abs(top.Right-bottom.Right)<=1&&top.Bottom<bottom.Top;
+            double tall=Math.Min(560,SystemParameters.WorkArea.Height);
+            window.Height=tall;window.UpdateLayout();
+            double tallHeight=window.Canvas.ActualHeight;
+            var large=RenderCanvas(frame,width,tallHeight);
+            var smallInk=InkBounds(small,any);var tallInk=InkBounds(large,any);
+            Data.Object(frame,"style")["vertical"]=false;window.Apply(frame);window.UpdateLayout();
+            Data.Object(frame,"style")["vertical"]=true;window.Apply(frame);window.UpdateLayout();
+            return single&&tallHeight>smallHeight*1.3&&!smallInk.IsEmpty&&!tallInk.IsEmpty&&tallInk.Height>smallInk.Height*1.3
+                &&Math.Abs(window.ActualHeight-tall)<2;
+        }
         static int RenderSample(string encoded){
             try{
                 var cfg=Data.Json.DeserializeObject(Encoding.UTF8.GetString(Convert.FromBase64String(encoded))) as IDictionary<string,object>;
-                var app=new Application();var canvas=new LyricCanvas();canvas.SetFrame(Data.Object(cfg,"frame"));double width=Data.Number(cfg,"width",760),dpi=Data.Number(cfg,"dpi",96);
-                canvas.Measure(new Size(width,double.PositiveInfinity));canvas.Arrange(new Rect(0,0,width,canvas.DesiredSize.Height));canvas.UpdateLayout();
+                var app=new Application();var canvas=new LyricCanvas();canvas.SetFrame(Data.Object(cfg,"frame"));double width=Data.Number(cfg,"width",760),dpi=Data.Number(cfg,"dpi",96),height=Data.Number(cfg,"height");
+                canvas.Measure(new Size(width,height>0?height:double.PositiveInfinity));canvas.Arrange(new Rect(0,0,width,height>0?height:canvas.DesiredSize.Height));canvas.UpdateLayout();
                 var image=new RenderTargetBitmap((int)Math.Ceiling(width*dpi/96),(int)Math.Ceiling(canvas.ActualHeight*dpi/96),dpi,dpi,PixelFormats.Pbgra32);image.Render(canvas);
                 var png=new PngBitmapEncoder();png.Frames.Add(BitmapFrame.Create(image));using(var output=File.Create(Data.Text(cfg,"output")))png.Save(output);app.Shutdown();return 0;
             }catch{return 1;}
