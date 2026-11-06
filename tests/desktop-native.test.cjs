@@ -16,7 +16,8 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 		const request=async(route,body)=>{const response=await fetch(endpoint+route+'?token='+token,{method:body===undefined?'GET':'POST',body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(5000)});assert.equal(response.status,200);return response.json();};
 		assert.equal((await fetch(endpoint+'/events?token=wrong')).status,403,'Requests without the per-session key must be rejected');
 		const frames=[{segments:[{text:'空',rt:'そら'},{text:'をみる'}],translation:'看天空',fontSize:35,topmost:false,style:{fontFamily:'微软雅黑',bold:false,colorTop:'#ffdede',colorBottom:'#ffb0b0',outline:true,outlineColor:'#cb7474'}},
-			{segments:[{text:'町',rt:'まち'},{text:'へゆく'}],translation:'前往小镇',fontSize:48,locked:true,topmost:true},
+			{segments:[{text:'町',rt:'まち'},{text:'へゆく'}],translation:'前往小镇',fontSize:48,rtWeight:'follow',locked:true,topmost:true,style:{vertical:true,bold:true,align:'split'},
+				next:{segments:[{text:'風',rt:'かぜ'},{text:'の音'}],translation:'风声'},karaoke:true,highlightTo:1},
 			{segments:[{text:'<script>文字だけ</script>',rt:'もじ'}],translation:'<img src=x>',fontSize:20,locked:false}];
 		for(const frame of frames){assert((await request('/frame',frame)).ok);await sleep(100);}
 		const events=await request('/events');assert(Array.isArray(events.events));

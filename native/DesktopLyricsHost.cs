@@ -38,14 +38,38 @@ namespace FuriganaPlusDesktop {
     sealed class LyricCanvas : FrameworkElement {
         sealed class Unit { public string Text,Reading; public double Width;public int From,To; }
         IDictionary<string, object> frame = new Dictionary<string,object>();
-        readonly Dictionary<string,FormattedText> formats=new Dictionary<string,FormattedText>();readonly Dictionary<FormattedText,Geometry> geometries=new Dictionary<FormattedText,Geometry>();Typeface face;string faceKey;
+        readonly Dictionary<string,FormattedText> formats=new Dictionary<string,FormattedText>();readonly Dictionary<FormattedText,Geometry> geometries=new Dictionary<FormattedText,Geometry>();Typeface face,rubyFace;string faceKey;
         public LyricCanvas() { TextOptions.SetTextFormattingMode(this,TextFormattingMode.Display);TextOptions.SetTextRenderingMode(this,TextRenderingMode.Grayscale); }
         public void SetFrame(IDictionary<string,object> value) { frame=value; formats.Clear();geometries.Clear();InvalidateMeasure(); InvalidateVisual(); }
         public double FontSize { get { return Data.Clamp(Data.Number(frame,"fontSize",36),8,144); } }
-        Typeface Face { get { var s=Data.Object(frame,"style");string key=Data.Text(s,"fontFamily","Microsoft YaHei")+"|"+Data.Bool(s,"bold");if(face==null||faceKey!=key){faceKey=key;face=new Typeface(new FontFamily(Data.Text(s,"fontFamily","Microsoft YaHei")),FontStyles.Normal,Data.Bool(s,"bold")?FontWeights.Bold:FontWeights.Normal,FontStretches.Normal);}return face; } }
-        FormattedText Format(string text,double size,bool cache=true) { string key=size.ToString(CultureInfo.InvariantCulture)+"|"+(text??"");FormattedText value;if(cache&&formats.TryGetValue(key,out value))return value;value=new FormattedText(text ?? "",CultureInfo.GetCultureInfo("ja-JP"),FlowDirection.LeftToRight,Face,size,Brushes.White,VisualTreeHelper.GetDpi(this).PixelsPerDip);if(cache)formats[key]=value;return value; }
+        double RubySize { get { return FontSize*Data.Clamp(Data.Number(frame,"rtSize",60),20,100)/100; } }
+        double RubyOpacity { get { return Data.Clamp(Data.Number(frame,"rtOpacity",80),20,100)/100; } }
+        public bool IsVertical { get { return Data.Bool(Data.Object(frame,"style"),"vertical"); } }
+        Typeface FaceFor(bool ruby) {
+            var style=Data.Object(frame,"style");
+            string family=Data.Text(style,"fontFamily","Microsoft YaHei");
+            var baseWeight=Data.Bool(style,"bold")?FontWeights.Bold:FontWeights.Normal;
+            string setting=Data.Text(frame,"rtWeight","400");
+            int numeric;
+            var rubyWeight=setting=="follow"?baseWeight:
+                FontWeight.FromOpenTypeWeight(int.TryParse(setting,out numeric)&&numeric>=300&&numeric<=700&&numeric%100==0?numeric:400);
+            string key=family+"|"+baseWeight.ToOpenTypeWeight()+"|"+rubyWeight.ToOpenTypeWeight();
+            if(face==null||faceKey!=key){
+                var font=new FontFamily(family);faceKey=key;
+                face=new Typeface(font,FontStyles.Normal,baseWeight,FontStretches.Normal);
+                rubyFace=rubyWeight==baseWeight?face:new Typeface(font,FontStyles.Normal,rubyWeight,FontStretches.Normal);
+            }
+            return ruby?rubyFace:face;
+        }
+        FormattedText Format(string text,double size,bool cache=true,bool ruby=false) { string key=(ruby?"rt|":"base|")+size.ToString(CultureInfo.InvariantCulture)+"|"+(text??"");FormattedText value;if(cache&&formats.TryGetValue(key,out value))return value;value=new FormattedText(text ?? "",CultureInfo.GetCultureInfo("ja-JP"),FlowDirection.LeftToRight,FaceFor(ruby),size,Brushes.White,VisualTreeHelper.GetDpi(this).PixelsPerDip);if(cache)formats[key]=value;return value; }
         Geometry GeometryFor(FormattedText text){Geometry geometry;if(!geometries.TryGetValue(text,out geometry)){geometry=text.BuildGeometry(new Point());if(geometry.CanFreeze)geometry.Freeze();geometries[text]=geometry;}return geometry;}
-        List<Unit> Units(object source) {
+        static void AddPlainUnits(List<Unit> units,string text,ref int offset,bool vertical) {
+            foreach(var part in TextParts(text,vertical)){
+                units.Add(new Unit {Text=part,Reading="",From=offset,To=offset+part.Length});
+                offset+=part.Length;
+            }
+        }
+        List<Unit> Units(object source,bool vertical=false) {
             var units=new List<Unit>(); var array=source as IEnumerable;
             if(array==null || source is string)return units;
             int limit=0,offset=0;
@@ -56,10 +80,8 @@ namespace FuriganaPlusDesktop {
                 if(Data.Bool(s,"hidden")){offset+=text.Length;continue;}
                 if(reading.Length>200)reading=reading.Substring(0,200);
                 if(reading.Length>0){units.Add(new Unit {Text=text,Reading=reading,From=offset,To=offset+text.Length});offset+=text.Length;}
-                else { var e=StringInfo.GetTextElementEnumerator(text); while(e.MoveNext()){string part=e.GetTextElement();units.Add(new Unit {Text=part,Reading="",From=offset,To=offset+part.Length});offset+=part.Length;} }
+                else AddPlainUnits(units,text,ref offset,vertical);
             }
-            double rt=FontSize*Data.Clamp(Data.Number(frame,"rtSize",60),20,100)/100;
-            foreach(var u in units)u.Width=Math.Max(Format(u.Text,FontSize).WidthIncludingTrailingWhitespace,Format(u.Reading,rt).WidthIncludingTrailingWhitespace)+(u.Reading.Length>0?FontSize*.12:0);
             return units;
         }
         List<List<Unit>> Wrap(List<Unit> units,double width) {
@@ -86,15 +108,24 @@ namespace FuriganaPlusDesktop {
             if(fraction>=1){DrawText(dc,text,origin,outline);return;}
             DrawText(dc,text,origin,outline,false);dc.PushClip(new RectangleGeometry(new Rect(origin.X-1,origin.Y-2,text.WidthIncludingTrailingWhitespace*fraction+1,text.Height+4)));DrawText(dc,text,origin,outline);dc.Pop();
         }
+        string LineAlign(bool secondary) {
+            string align=Data.Text(Data.Object(frame,"style"),"align","center");
+            return align=="split"?(secondary?"right":"left"):align;
+        }
         double DrawLines(DrawingContext dc,object source,string translation,double y,double width,bool secondary) {
-            double size=FontSize,rt=size*Data.Clamp(Data.Number(frame,"rtSize",60),20,100)/100;
-            var rows=Wrap(Units(source),width);var style=Data.Object(frame,"style");string align=Data.Text(style,"align","center");
+            double size=FontSize,rt=RubySize;
+            var units=Units(source);
+            foreach(var u in units){
+                u.Width=Format(u.Text,size).WidthIncludingTrailingWhitespace;
+                if(u.Reading.Length>0)u.Width=Math.Max(u.Width,Format(u.Reading,rt,ruby:true).WidthIncludingTrailingWhitespace)+size*.12;
+            }
+            var rows=Wrap(units,width);var style=Data.Object(frame,"style");string align=LineAlign(secondary);
             foreach(var row in rows) {
                 // Every line reserves the same reading strip, including pure
                 // kana lines. Centre the visible ink, not trailing spaces or
                 // the font's asymmetric side bearings.
                 double cursor=0,inkLeft=double.PositiveInfinity,inkRight=double.NegativeInfinity;bool outlined=Data.Bool(style,"outline");
-                foreach(var u in row){var b=Format(u.Text,size);var ink=GeometryFor(b).Bounds;if(!ink.IsEmpty){inkLeft=Math.Min(inkLeft,cursor+(u.Width-b.WidthIncludingTrailingWhitespace)/2+ink.Left-(outlined?1:0));inkRight=Math.Max(inkRight,cursor+(u.Width-b.WidthIncludingTrailingWhitespace)/2+ink.Right+(outlined?1:0));}if(u.Reading.Length>0){var r=Format(u.Reading,rt);ink=GeometryFor(r).Bounds;if(!ink.IsEmpty){inkLeft=Math.Min(inkLeft,cursor+(u.Width-r.WidthIncludingTrailingWhitespace)/2+ink.Left);inkRight=Math.Max(inkRight,cursor+(u.Width-r.WidthIncludingTrailingWhitespace)/2+ink.Right);}}cursor+=u.Width;}
+                foreach(var u in row){var b=Format(u.Text,size);var ink=GeometryFor(b).Bounds;if(!ink.IsEmpty){inkLeft=Math.Min(inkLeft,cursor+(u.Width-b.WidthIncludingTrailingWhitespace)/2+ink.Left-(outlined?1:0));inkRight=Math.Max(inkRight,cursor+(u.Width-b.WidthIncludingTrailingWhitespace)/2+ink.Right+(outlined?1:0));}if(u.Reading.Length>0){var r=Format(u.Reading,rt,ruby:true);ink=GeometryFor(r).Bounds;if(!ink.IsEmpty){inkLeft=Math.Min(inkLeft,cursor+(u.Width-r.WidthIncludingTrailingWhitespace)/2+ink.Left);inkRight=Math.Max(inkRight,cursor+(u.Width-r.WidthIncludingTrailingWhitespace)/2+ink.Right);}}cursor+=u.Width;}
                 if(double.IsInfinity(inkLeft)){inkLeft=0;inkRight=cursor;}
                 double readingHeight=rt*1.25,rowHeight=readingHeight+Format("国",size).Height;
                 double x=align=="left"?-inkLeft:align=="right"?width-inkRight:(width-inkRight-inkLeft)/2;
@@ -103,7 +134,7 @@ namespace FuriganaPlusDesktop {
                         var b=Format(u.Text,size);double fraction=1;
                         if(Data.Bool(frame,"karaoke")){int count=(int)Data.Clamp(Data.Number(frame,"highlightTo")-u.From,0,u.Text.Length);fraction=b.WidthIncludingTrailingWhitespace>0?Format(u.Text.Substring(0,count),size).WidthIncludingTrailingWhitespace/b.WidthIncludingTrailingWhitespace:0;}
                         DrawUnitText(dc,b,new Point(x+(u.Width-b.WidthIncludingTrailingWhitespace)/2,y+readingHeight),true,secondary,fraction);
-                        if(u.Reading.Length>0) {var r=Format(u.Reading,rt);dc.PushOpacity(Data.Clamp(Data.Number(frame,"rtOpacity",80),20,100)/100);DrawUnitText(dc,r,new Point(x+(u.Width-r.WidthIncludingTrailingWhitespace)/2,y),false,secondary,fraction);dc.Pop();}
+                        if(u.Reading.Length>0) {var r=Format(u.Reading,rt,ruby:true);dc.PushOpacity(RubyOpacity);DrawUnitText(dc,r,new Point(x+(u.Width-r.WidthIncludingTrailingWhitespace)/2,y),false,secondary,fraction);dc.Pop();}
                     }
                     x+=u.Width;
                 }
@@ -117,15 +148,182 @@ namespace FuriganaPlusDesktop {
             }
             return y;
         }
-        double Layout(DrawingContext dc,double width) {
-            double y=DrawLines(dc,Data.Get(frame,"segments"),Data.Text(frame,"translation"),0,width,false);
-            var next=Data.Object(frame,"next");if(next.Count>0)y=DrawLines(dc,Data.Get(next,"segments"),Data.Text(next,"translation"),y+6,width,true);
+
+        sealed class VerticalGlyph {
+            public FormattedText Text;
+            public Rect Ink;
+            public int Characters;
+            public double Advance, ShiftX, ShiftY;
+            public bool Sideways;
+        }
+        sealed class VerticalRun {
+            public readonly List<VerticalGlyph> Glyphs=new List<VerticalGlyph>();
+            public double Height,Width;
+            public double Progress(int characters) {
+                double advance=0;
+                foreach(var glyph in Glyphs){
+                    if(characters<=0)break;
+                    advance+=glyph.Advance*Math.Min(1,(double)characters/glyph.Characters);
+                    characters-=glyph.Characters;
+                }
+                return Height>0?advance/Height:0;
+            }
+        }
+        sealed class VerticalUnit {
+            public Unit Source;
+            public VerticalRun Base,Ruby;
+            public double Height;
+        }
+        sealed class VerticalColumn {
+            public readonly List<VerticalUnit> Units=new List<VerticalUnit>();
+            public double Height,BaseWidth,RubyWidth;
+            public bool Lyric,Secondary;
+        }
+        double verticalHeightLimit=540,measuredHeight=double.PositiveInfinity;
+        public void LimitVerticalHeight(double value) {
+            value=Math.Max(24,value);
+            if(Math.Abs(verticalHeightLimit-value)<.5)return;
+            verticalHeightLimit=value;InvalidateMeasure();InvalidateVisual();
+        }
+        static bool IsLatinPart(string part) {
+            char c=part[0];
+            return (c>='!'&&c<='~')||(c>='À'&&c<='ɏ')||c=='’'||c=='‘';
+        }
+        static IEnumerable<string> TextParts(string text,bool groupLatin) {
+            var elements=StringInfo.GetTextElementEnumerator(text);
+            StringBuilder latin=null;
+            while(elements.MoveNext()){
+                string part=elements.GetTextElement();
+                if(groupLatin&&IsLatinPart(part)){if(latin==null)latin=new StringBuilder();latin.Append(part);continue;}
+                if(latin!=null&&latin.Length>0){yield return latin.ToString();latin.Clear();}
+                yield return part;
+            }
+            if(latin!=null&&latin.Length>0)yield return latin.ToString();
+        }
+        VerticalRun MakeVerticalRun(string text,double size,bool ruby) {
+            var run=new VerticalRun();
+            foreach(var part in TextParts(text,true)){
+                var glyph=new VerticalGlyph {Characters=part.Length,Advance=size*.46,Ink=Rect.Empty};
+                if(!string.IsNullOrWhiteSpace(part)){
+                    // Upright CJK cells; keep Western words together and rotate the marks
+                    // that change direction in Japanese vertical composition (including ー).
+                    bool latin=IsLatinPart(part);
+                    glyph.Sideways=latin||(part.Length==1&&"ーｰ―—…‥〜～「」『』【】（）［］｛｝〈〉《》〔〕".IndexOf(part[0])>=0);
+                    glyph.Text=Format(part,size,ruby:ruby);glyph.Ink=GeometryFor(glyph.Text).Bounds;
+                    if(part.Length==1){
+                        if("、。，．｡､".IndexOf(part[0])>=0){glyph.ShiftX=size*.28;glyph.ShiftY=-size*.27;}
+                        else if("ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ".IndexOf(part[0])>=0){glyph.ShiftX=size*.13;glyph.ShiftY=-size*.1;}
+                    }
+                    double inkHeight=glyph.Ink.IsEmpty?0:glyph.Sideways?glyph.Ink.Width:glyph.Ink.Height;
+                    glyph.Advance=Math.Max(latin?glyph.Text.WidthIncludingTrailingWhitespace+size*.08:size*1.12,inkHeight+size*.08);
+                    if(!glyph.Ink.IsEmpty){
+                        double cross=glyph.Sideways?glyph.Ink.Height:glyph.Ink.Width;
+                        run.Width=Math.Max(run.Width,cross+2*Math.Abs(glyph.ShiftX)+(ruby?0:2));
+                    }
+                }
+                run.Height+=glyph.Advance;run.Glyphs.Add(glyph);
+            }
+            return run;
+        }
+        void AddVerticalColumns(List<VerticalColumn> columns,List<Unit> units,double limit,bool lyric,bool secondary,bool reserve=false) {
+            double size=FontSize,rt=RubySize;
+            Func<VerticalColumn> start=()=>new VerticalColumn {BaseWidth=size*1.15,RubyWidth=lyric?rt*1.16+size*.1:0,Lyric=lyric,Secondary=secondary};
+            var column=start();
+            foreach(var unit in units){
+                if(unit.Text=="\r"||unit.Text=="\n"||unit.Text=="\r\n"){
+                    if(column.Units.Count>0){columns.Add(column);column=start();}
+                    continue;
+                }
+                var basis=MakeVerticalRun(unit.Text,size,false);
+                if(basis.Height==0)continue;
+                var ruby=unit.Reading.Length==0?null:MakeVerticalRun(unit.Reading,rt,true);
+                double height=ruby==null?basis.Height:Math.Max(basis.Height,ruby.Height)+size*.12;
+                if(column.Units.Count>0&&column.Height+height>limit){columns.Add(column);column=start();}
+                column.Units.Add(new VerticalUnit {Source=unit,Base=basis,Ruby=ruby,Height=height});
+                column.Height+=height;column.BaseWidth=Math.Max(column.BaseWidth,basis.Width);
+                if(ruby!=null)column.RubyWidth=Math.Max(column.RubyWidth,ruby.Width+size*.1);
+            }
+            if(column.Units.Count>0||(reserve&&units.Count==0))columns.Add(column);
+        }
+        void AddVerticalLine(List<VerticalColumn> columns,object source,string translation,double limit,bool secondary) {
+            int before=columns.Count;
+            AddVerticalColumns(columns,Units(source,true),limit,true,secondary);
+            if(columns.Count==before||string.IsNullOrWhiteSpace(translation)&&!Data.Bool(frame,"reserveSecondary"))return;
+            var units=new List<Unit>();int offset=0;
+            AddPlainUnits(units,translation.Trim(),ref offset,true);
+            AddVerticalColumns(columns,units,limit,false,secondary,true);
+        }
+        void DrawVerticalRun(DrawingContext dc,VerticalRun run,double x,double y,bool outline,bool played) {
+            foreach(var glyph in run.Glyphs){
+                if(!glyph.Ink.IsEmpty){
+                    double cx=x+glyph.ShiftX,cy=y+glyph.Advance/2+glyph.ShiftY;
+                    if(glyph.Sideways)dc.PushTransform(new RotateTransform(90,cx,cy));
+                    var origin=new Point(cx-(glyph.Ink.Left+glyph.Ink.Right)/2,cy-(glyph.Ink.Top+glyph.Ink.Bottom)/2);
+                    DrawText(dc,glyph.Text,origin,outline,played);
+                    if(glyph.Sideways)dc.Pop();
+                }
+                y+=glyph.Advance;
+            }
+        }
+        void DrawVerticalProgress(DrawingContext dc,VerticalRun run,double x,double y,bool outline,bool secondary,double fraction) {
+            DrawVerticalRun(dc,run,x,y,outline,!secondary&&fraction>=1);
+            if(secondary||fraction<=0||fraction>=1)return;
+            double half=run.Width/2+2;
+            dc.PushClip(new RectangleGeometry(new Rect(x-half,y-1,half*2,run.Height*fraction+1)));
+            DrawVerticalRun(dc,run,x,y,outline,true);dc.Pop();
+        }
+        double DrawVertical(DrawingContext dc,double width,double limit) {
+            var columns=new List<VerticalColumn>();
+            AddVerticalLine(columns,Data.Get(frame,"segments"),Data.Text(frame,"translation"),limit,false);
+            var next=Data.Object(frame,"next");
+            if(next.Count>0)AddVerticalLine(columns,Data.Get(next,"segments"),Data.Text(next,"translation"),limit,true);
+            if(columns.Count==0)return 0;
+            double gap=FontSize*.23,readingGap=FontSize*.1,height=0,totalWidth=gap*(columns.Count-1);
+            foreach(var col in columns){height=Math.Max(height,col.Height);totalWidth+=col.BaseWidth+col.RubyWidth;}
+            double scale=Math.Min(1,Math.Min(Math.Max(1,width-4)/totalWidth,limit/height));
+            if(dc!=null){
+                bool karaoke=Data.Bool(frame,"karaoke");
+                double highlight=Data.Number(frame,"highlightTo");
+                double right=totalWidth;
+                dc.PushTransform(new TranslateTransform((width-totalWidth*scale)/2,2));
+                dc.PushTransform(new ScaleTransform(scale,scale));
+                foreach(var col in columns){
+                    // Read down, then continue in the column to the left. The
+                    // right-hand strip remains reserved even on pure-kana columns.
+                    double left=right-col.BaseWidth-col.RubyWidth;
+                    double x=left+col.BaseWidth/2;
+                    string align=LineAlign(col.Secondary);
+                    double y=align=="left"?0:align=="right"?height-col.Height:(height-col.Height)/2;
+                    foreach(var unit in col.Units){
+                        double fraction=col.Lyric&&karaoke?unit.Base.Progress((int)Data.Clamp(highlight-unit.Source.From,0,unit.Source.Text.Length)):1;
+                        DrawVerticalProgress(dc,unit.Base,x,y+(unit.Height-unit.Base.Height)/2,true,col.Secondary,fraction);
+                        if(unit.Ruby!=null){
+                            dc.PushOpacity(RubyOpacity);
+                            DrawVerticalProgress(dc,unit.Ruby,left+col.BaseWidth+(col.RubyWidth+readingGap)/2,
+                                y+(unit.Height-unit.Ruby.Height)/2,false,col.Secondary,fraction);
+                            dc.Pop();
+                        }
+                        y+=unit.Height;
+                    }
+                    right=left-gap;
+                }
+                dc.Pop();dc.Pop();
+            }
+            return height*scale+2;
+        }
+        double Layout(DrawingContext dc,double width,double availableHeight=double.PositiveInfinity) {
+            double y;
+            if(IsVertical)y=DrawVertical(dc,width,Math.Max(24,Math.Min(verticalHeightLimit,availableHeight-7)));
+            else {
+                y=DrawLines(dc,Data.Get(frame,"segments"),Data.Text(frame,"translation"),0,width,false);
+                var next=Data.Object(frame,"next");if(next.Count>0)y=DrawLines(dc,Data.Get(next,"segments"),Data.Text(next,"translation"),y+6,width,true);
+            }
             string message=Data.Text(frame,"message");
             if(y==0 && message.Length>0) { var f=Format(message,Math.Min(FontSize,24));f.MaxTextWidth=Math.Max(20,width);f.TextAlignment=TextAlignment.Center;if(dc!=null)dc.DrawText(f,new Point(0,6));y=f.Height+16; }
             return Math.Max(24,y+5);
         }
-        protected override Size MeasureOverride(Size available) { double width=double.IsInfinity(available.Width)?860:Math.Max(80,available.Width);return new Size(width,Layout(null,width)); }
-        protected override void OnRender(DrawingContext dc) { Layout(dc,Math.Max(80,ActualWidth)); }
+        protected override Size MeasureOverride(Size available) { double width=double.IsInfinity(available.Width)?860:Math.Max(80,available.Width);measuredHeight=available.Height;return new Size(width,Layout(null,width,measuredHeight)); }
+        protected override void OnRender(DrawingContext dc) { Layout(dc,Math.Max(80,ActualWidth),measuredHeight); }
     }
 
     // Original vector controls, using the client's native action names. No
@@ -161,7 +359,11 @@ namespace FuriganaPlusDesktop {
         [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd,int index);
         [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hwnd,int index,int value);
         [StructLayout(LayoutKind.Sequential)] struct CursorPoint { public int X,Y; }
+        [StructLayout(LayoutKind.Sequential)] struct ScreenRect { public int Left,Top,Right,Bottom; }
+        [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int Size; public ScreenRect Monitor,Work; public uint Flags; }
         [DllImport("user32.dll")] static extern bool GetCursorPos(out CursorPoint point);
+        [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window,uint flags);
+        [DllImport("user32.dll",EntryPoint="GetMonitorInfoW")] static extern bool GetMonitorInfo(IntPtr monitor,ref MonitorInfo info);
         [StructLayout(LayoutKind.Sequential)] struct MouseTracking {public int Size,Flags;public IntPtr Window;public uint HoverTime;}
         [DllImport("user32.dll")] static extern bool TrackMouseEvent(ref MouseTracking tracking);
         public readonly LyricCanvas Canvas=new LyricCanvas();
@@ -196,12 +398,12 @@ namespace FuriganaPlusDesktop {
             Canvas.MouseLeftButtonDown+=(s,e)=>{if(!locked){SetManipulating(true);try{DragMove();SaveBounds();}catch(InvalidOperationException){}finally{SetManipulating(false);}}};
             PreviewMouseWheel+=(s,e)=>{if(locked)return;if((Keyboard.Modifiers&ModifierKeys.Control)!=0)action("fontSize",Canvas.FontSize+(e.Delta>0?1:-1));else action(e.Delta>0?"offset_back":"offset_forward",null);e.Handled=true;};
             SourceInitialized+=(s,e)=>{handle=new WindowInteropHelper(this).Handle;SetWindowLong(handle,GWL_EXSTYLE,GetWindowLong(handle,GWL_EXSTYLE)|WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW|(locked?WS_EX_TRANSPARENT:0));HwndSource.FromHwnd(handle).AddHook(ResizeHitTest);};
-            SizeChanged+=(s,e)=>{if(!rendering)SaveBounds();};Closing+=(s,e)=>{if(!closing){e.Cancel=true;closingRequested=true;Hide();action("close",null);}};
+            SizeChanged+=(s,e)=>{if(Canvas.IsVertical){RefreshVerticalHeight();KeepVerticalOnScreen();}if(!rendering)SaveBounds();};Closing+=(s,e)=>{if(!closing){e.Cancel=true;closingRequested=true;Hide();action("close",null);}};
         }
         static ControlTemplate FramelessTemplate(){var template=new ControlTemplate(typeof(Window));var presenter=new FrameworkElementFactory(typeof(ContentPresenter));presenter.SetValue(ContentPresenter.ContentProperty,new TemplateBindingExtension(ContentControl.ContentProperty));template.VisualTree=presenter;return template;}
         IntPtr ResizeHitTest(IntPtr hwnd,int msg,IntPtr wp,IntPtr lp,ref bool handled){
             if(msg==0x231&&!locked){SetManipulating(true);return IntPtr.Zero;}
-            if(msg==0x232){SetManipulating(false);SaveBounds();return IntPtr.Zero;}
+            if(msg==0x232){SetManipulating(false);if(Canvas.IsVertical){RefreshVerticalHeight();KeepVerticalOnScreen();}SaveBounds();return IntPtr.Zero;}
             if(msg==0xa0&&!locked){SetHover(true);leaveTimer.Stop();if(!trackingBorder){var tracking=new MouseTracking {Size=Marshal.SizeOf(typeof(MouseTracking)),Flags=0x12,Window=handle};trackingBorder=TrackMouseEvent(ref tracking);}}
             if(msg==0x2a2){trackingBorder=false;StartHideDelay();}
             if(msg!=0x84||locked)return IntPtr.Zero;long packed=lp.ToInt64();var p=PointFromScreen(new Point((short)(packed&0xffff),(short)((packed>>16)&0xffff)));int hit=0;
@@ -217,6 +419,27 @@ namespace FuriganaPlusDesktop {
         void StartHideDelay(){leaveTimer.Stop();if(!locked&&!manipulating)leaveTimer.Start();}
         void SetHover(bool value){value=(value||manipulating)&&!locked;if(chromeVisible==value)return;chromeVisible=value;toolbar.Visibility=value?Visibility.Visible:Visibility.Hidden;hoverFrame.Background=value?new SolidColorBrush(Color.FromArgb(120,0,0,0)):Brushes.Transparent;hoverFrame.BorderBrush=value?new SolidColorBrush(Color.FromArgb(70,255,255,255)):Brushes.Transparent;}
         void SetManipulating(bool value){manipulating=value;if(value){leaveTimer.Stop();SetHover(true);}else{if(IsMouseOver)SetHover(true);StartHideDelay();}}
+        Rect WorkArea() {
+            if(handle==IntPtr.Zero||PresentationSource.FromVisual(this)==null)return SystemParameters.WorkArea;
+            var monitor=MonitorFromWindow(handle,2); // nearest monitor
+            var info=new MonitorInfo {Size=Marshal.SizeOf(typeof(MonitorInfo))};
+            if(monitor==IntPtr.Zero||!GetMonitorInfo(monitor,ref info))return SystemParameters.WorkArea;
+            var start=PointFromScreen(new Point(info.Work.Left,info.Work.Top));
+            var end=PointFromScreen(new Point(info.Work.Right,info.Work.Bottom));
+            return new Rect(Left+start.X,Top+start.Y,end.X-start.X,end.Y-start.Y);
+        }
+        void RefreshVerticalHeight() {
+            double chrome=Math.Max(32,toolbar.ActualHeight)+12;
+            double limit=Math.Min(540,WorkArea().Height-chrome);
+            if(SizeToContent==SizeToContent.Manual&&ActualHeight>0)limit=Math.Min(limit,ActualHeight-chrome);
+            Canvas.LimitVerticalHeight(limit);
+        }
+        void KeepVerticalOnScreen() {
+            if(!IsVisible||manipulating)return;
+            var work=WorkArea();
+            if(Left+ActualWidth>work.Left&&Left<work.Right&&Top>=work.Top&&Top<work.Bottom&&Top+ActualHeight>work.Bottom)
+                Top=Math.Max(work.Top,work.Bottom-ActualHeight);
+        }
         void SaveBounds() { if(IsLoaded)action("bounds",new {x=Left,y=Top,width=Width}); }
         public void SetLocked(bool value) { if(locked==value)return;locked=value;if(handle!=IntPtr.Zero){int style=GetWindowLong(handle,GWL_EXSTYLE);SetWindowLong(handle,GWL_EXSTYLE,value?style|WS_EX_TRANSPARENT:style&~WS_EX_TRANSPARENT);}if(value){leaveTimer.Stop();SetHover(false);ResizeMode=ResizeMode.NoResize;lockHover.Start();}else{ResizeMode=ResizeMode.CanResize;lockHover.Stop();unlockWindow.Hide();SetHover(true);StartHideDelay();} }
         void ShowUnlockHandle(){if(unlockWindow.Owner==null&&IsVisible)unlockWindow.Owner=this;unlockWindow.Topmost=Topmost;unlockWindow.Left=Left+(ActualWidth-unlockWindow.Width)/2;unlockWindow.Top=Top+1;if(!unlockWindow.IsVisible)unlockWindow.Show();}
@@ -237,7 +460,11 @@ namespace FuriganaPlusDesktop {
                 Topmost=Data.Bool(frame,"topmost",true);((ToolbarGlyph)play.Content).Kind=Data.Bool(frame,"playing")?"pause":"play_pause";
                 var bounds=Data.Object(frame,"bounds");
                 if(!IsVisible && bounds.Count>0){var work=SystemParameters.WorkArea;Width=Data.Clamp(Data.Number(bounds,"width",900),240,Math.Max(240,work.Width));Left=Data.Clamp(Data.Number(bounds,"x",work.Left+(work.Width-Width)/2),SystemParameters.VirtualScreenLeft,SystemParameters.VirtualScreenLeft+SystemParameters.VirtualScreenWidth-100);Top=Data.Clamp(Data.Number(bounds,"y",work.Bottom-230),SystemParameters.VirtualScreenTop,SystemParameters.VirtualScreenTop+SystemParameters.VirtualScreenHeight-60);}
+                bool vertical=Data.Bool(Data.Object(frame,"style"),"vertical");
+                if(vertical!=Canvas.IsVertical)SizeToContent=SizeToContent.Height;
+                if(vertical)RefreshVerticalHeight();
                 SetLocked(Data.Bool(frame,"locked"));Canvas.SetFrame(frame);if(!IsVisible)Show();
+                if(vertical)KeepVerticalOnScreen();
             }finally{rendering=false;}
         }
         public void Shutdown() { closing=true;leaveTimer.Stop();lockHover.Stop();unlockWindow.Close();Close(); }
@@ -311,12 +538,17 @@ namespace FuriganaPlusDesktop {
                 frame["rtSize"]=20;var small=RenderCanvas(frame);frame["rtSize"]=100;var large=RenderCanvas(frame);bool readingSize=large.PixelHeight>small.PixelHeight+30;
                 frame["karaoke"]=true;frame["highlightTo"]=0;var unplayed=RenderCanvas(frame);frame["highlightTo"]=5;var played=RenderCanvas(frame);bool karaoke=InkDifference(unplayed,played)>300;
                 bool stableBaseline,stableHeight,emptySecondarySlot;double textCenterError;LayoutChecks(out stableBaseline,out stableHeight,out emptySecondarySlot,out textCenterError);
-                bool passed=window.AllowsTransparency&&(locked&0x80000)!=0&&(locked&0x20)!=0&&(unlocked&0x20)==0&&unlockAction&&unlockCentered&&unlockAboveLyrics&&unlockTransparent&&hoverBounds&&hoverAcrossFrames&&resizeBounds&&opacity&&readingSize&&karaoke&&stableBaseline&&stableHeight&&emptySecondarySlot&&textCenterError<=1&&clear>ink&&ink>300;
-                File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=passed,transparentPixels=clear,inkPixels=ink,layered=(locked&0x80000)!=0,lockedClickThrough=(locked&0x20)!=0,unlockedInteractive=(unlocked&0x20)==0,unlockHandle=unlockAction,unlockCentered,unlockAboveLyrics,unlockTransparent,hoverBounds,hoverAcrossFrames,resizeBounds,opacity,readingSize,karaoke,stableBaseline,stableHeight,emptySecondarySlot,textCenterError,width=image.PixelWidth,height=image.PixelHeight}),new UTF8Encoding(false));
+                bool horizontalWeight=RubyWeightCheck(false),verticalWeight=RubyWeightCheck(true);
+                bool rightRuby,verticalSlot,columnsRightToLeft,verticalProgress,splitAlignment;
+                CompositionChecks(out rightRuby,out verticalSlot,out columnsRightToLeft,out verticalProgress,out splitAlignment);
+                bool passed=window.AllowsTransparency&&(locked&0x80000)!=0&&(locked&0x20)!=0&&(unlocked&0x20)==0&&unlockAction&&unlockCentered&&unlockAboveLyrics&&unlockTransparent&&hoverBounds&&hoverAcrossFrames&&resizeBounds&&opacity&&readingSize&&karaoke&&stableBaseline&&stableHeight&&emptySecondarySlot&&textCenterError<=1&&clear>ink&&ink>300
+                    &&horizontalWeight&&verticalWeight&&rightRuby&&verticalSlot&&columnsRightToLeft&&verticalProgress&&splitAlignment;
+                File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=passed,transparentPixels=clear,inkPixels=ink,layered=(locked&0x80000)!=0,lockedClickThrough=(locked&0x20)!=0,unlockedInteractive=(unlocked&0x20)==0,unlockHandle=unlockAction,unlockCentered,unlockAboveLyrics,unlockTransparent,hoverBounds,hoverAcrossFrames,resizeBounds,opacity,readingSize,karaoke,stableBaseline,stableHeight,emptySecondarySlot,textCenterError,width=image.PixelWidth,height=image.PixelHeight,
+                    horizontalWeight,verticalWeight,rightRuby,verticalSlot,columnsRightToLeft,verticalProgress,splitAlignment}),new UTF8Encoding(false));
                 window.Shutdown();app.Shutdown();return passed?0:1;
             }catch(Exception e){File.WriteAllText(Path.Combine(directory,"native-result.json"),Data.Json.Serialize(new {passed=false,error=e.ToString()}));return 1;}
         }
-        static RenderTargetBitmap RenderCanvas(IDictionary<string,object> frame){var canvas=new LyricCanvas();canvas.SetFrame(frame);canvas.Measure(new Size(760,double.PositiveInfinity));canvas.Arrange(new Rect(0,0,760,canvas.DesiredSize.Height));canvas.UpdateLayout();var image=new RenderTargetBitmap(760,(int)Math.Ceiling(canvas.ActualHeight),96,96,PixelFormats.Pbgra32);image.Render(canvas);return image;}
+        static RenderTargetBitmap RenderCanvas(IDictionary<string,object> frame,int width=760,double height=double.PositiveInfinity){var canvas=new LyricCanvas();canvas.SetFrame(frame);canvas.Measure(new Size(width,height));canvas.Arrange(new Rect(0,0,width,canvas.DesiredSize.Height));canvas.UpdateLayout();var image=new RenderTargetBitmap(width,(int)Math.Ceiling(canvas.ActualHeight),96,96,PixelFormats.Pbgra32);image.Render(canvas);return image;}
         static byte[] Pixels(RenderTargetBitmap image){var bytes=new byte[image.PixelWidth*image.PixelHeight*4];image.CopyPixels(bytes,image.PixelWidth*4,0);return bytes;}
         static int TopAlpha(RenderTargetBitmap image){var bytes=Pixels(image);int max=0;for(int i=3;i<Math.Min(bytes.Length,image.PixelWidth*26*4);i+=4)max=Math.Max(max,bytes[i]);return max;}
         static int InkDifference(RenderTargetBitmap first,RenderTargetBitmap second){var a=Pixels(first);var b=Pixels(second);int changed=0;for(int i=0;i<Math.Min(a.Length,b.Length);i+=4)if(a[i]!=b[i]||a[i+1]!=b[i+1]||a[i+2]!=b[i+2])changed++;return changed;}
@@ -327,6 +559,57 @@ namespace FuriganaPlusDesktop {
             centerError=Math.Abs((left+right+1)/2.0-annotated.PixelWidth/2.0);
             frame["segments"]=new object[]{new Dictionary<string,object>{{"text","  空をみる  "}}};var plain=RenderCanvas(frame);baseline=FirstOpaqueRow(annotated)==FirstOpaqueRow(plain);height=annotated.PixelHeight==plain.PixelHeight;
             frame["translation"]="";var missing=RenderCanvas(frame);secondary=plain.PixelHeight==missing.PixelHeight;
+        }
+        static IDictionary<string,object> TestFrame(string json){return (IDictionary<string,object>)Data.Json.DeserializeObject(json);}
+        static bool RubyWeightCheck(bool vertical){
+            // Arial's regular and bold faces are available on Windows runners;
+            // synthetic Latin here isolates weight from Japanese font fallback.
+            var frame=TestFrame("{\"fontSize\":40,\"rtSize\":44,\"rtOpacity\":100,\"segments\":[{\"text\":\"Rain\",\"rt\":\"abc\"}],\"style\":{\"fontFamily\":\"Arial\",\"bold\":true}}");
+            Data.Object(frame,"style")["vertical"]=vertical;
+            frame["rtWeight"]=400;var regular=RenderCanvas(frame);
+            frame["rtWeight"]="700";var bold=RenderCanvas(frame);
+            frame["rtWeight"]="follow";var follow=RenderCanvas(frame);
+            return InkDifference(regular,bold)>30&&bold.PixelHeight==follow.PixelHeight&&InkDifference(bold,follow)==0;
+        }
+        static Rect InkBounds(RenderTargetBitmap image,Func<byte,byte,byte,bool> matches,int minX=0){
+            var bytes=Pixels(image);int left=image.PixelWidth,top=image.PixelHeight,right=-1,bottom=-1;
+            for(int y=0;y<image.PixelHeight;y++)for(int x=minX;x<image.PixelWidth;x++){
+                int i=(y*image.PixelWidth+x)*4;
+                if(bytes[i+3]<220||!matches(bytes[i+2],bytes[i+1],bytes[i]))continue;
+                left=Math.Min(left,x);top=Math.Min(top,y);right=Math.Max(right,x);bottom=Math.Max(bottom,y);
+            }
+            return right<0?Rect.Empty:new Rect(left,top,right-left+1,bottom-top+1);
+        }
+        static void CompositionChecks(out bool rightRuby,out bool stableSlot,out bool rightToLeft,out bool verticalProgress,out bool splitAlignment){
+            var frame=TestFrame("{\"fontSize\":36,\"rtSize\":50,\"rtOpacity\":20,\"segments\":[{\"text\":\"雨\",\"rt\":\"あめ\"},{\"text\":\"の日\"}],\"style\":{\"vertical\":true,\"colorTop\":\"#ff4444\",\"colorBottom\":\"#ff4444\",\"unplayedColorTop\":\"#448aff\",\"unplayedColorBottom\":\"#448aff\"}}");
+            Func<byte,byte,byte,bool> any=(r,g,b)=>true, red=(r,g,b)=>r>b+60, blue=(r,g,b)=>b>r+60;
+            var body=InkBounds(RenderCanvas(frame),any);
+            frame["rtOpacity"]=100;
+            var reading=body.IsEmpty?Rect.Empty:InkBounds(RenderCanvas(frame),any,(int)Math.Ceiling(body.Right)+1);
+            rightRuby=!body.IsEmpty&&!reading.IsEmpty&&reading.Left>body.Right&&reading.Height>reading.Width*1.3&&body.Height>body.Width*2;
+            frame["segments"]=TestFrame("{\"line\":[{\"text\":\"雨の日\"}]}")["line"];
+            var withoutRuby=InkBounds(RenderCanvas(frame),any);
+            stableSlot=!body.IsEmpty&&!withoutRuby.IsEmpty&&Math.Abs(withoutRuby.Left-body.Left)<=1&&Math.Abs(withoutRuby.Right-body.Right)<=1;
+
+            var style=Data.Object(frame,"style");
+            frame["segments"]=TestFrame("{\"line\":[{\"text\":\"雨雨雨雨雨雨雨雨\"}]}")["line"];
+            frame["karaoke"]=true;frame["highlightTo"]=4;
+            var wrapped=RenderCanvas(frame,260,177);
+            var first=InkBounds(wrapped,red);var second=InkBounds(wrapped,blue);
+            rightToLeft=!first.IsEmpty&&!second.IsEmpty&&first.Left>second.Right&&wrapped.PixelHeight<=177;
+
+            frame["segments"]=TestFrame("{\"line\":[{\"text\":\"雨空\",\"rt\":\"あまぞら\"}]}")["line"];
+            frame["highlightTo"]=1;
+            var partial=RenderCanvas(frame);
+            first=InkBounds(partial,red);second=InkBounds(partial,blue);
+            verticalProgress=!first.IsEmpty&&!second.IsEmpty&&first.Top<second.Top&&first.Bottom<=second.Top+2;
+
+            frame["segments"]=TestFrame("{\"line\":[{\"text\":\"雨の日\"}]}")["line"];
+            frame["next"]=TestFrame("{\"segments\":[{\"text\":\"風の音\"}],\"translation\":\"风声\"}");
+            frame["translation"]="雨天";frame["karaoke"]=false;style["vertical"]=false;style["align"]="split";
+            var split=RenderCanvas(frame);
+            first=InkBounds(split,red);second=InkBounds(split,blue);
+            splitAlignment=!first.IsEmpty&&!second.IsEmpty&&first.Left<4&&second.Right>split.PixelWidth-4&&first.Right<second.Left&&first.Bottom<second.Top;
         }
         static int RenderSample(string encoded){
             try{

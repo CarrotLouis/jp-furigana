@@ -44,6 +44,10 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	const fontCalls=[];desktop.setFontSize({getState:()=>({setting:{lyricFont:'默认',lyricFontDefault:'等线',lyricFontStyle:1}}),dispatch:action=>fontCalls.push(action)},40,{channel:{call:(name,cb,args)=>fontCalls.push({name,args})}});
 	assert.equal(fontCalls[0].payload.lyricFontSize,40);assert.deepEqual(fontCalls[1],{name:'player.setLRCFont',args:['40','1','等线']},'Wheel updates the original native renderer as well as Redux');
 	assert.equal(desktop.nativeStyle({lyricFont:'默认',lyricFontDefault:'等线',lyricFontSize:16}).fontFamily,'等线');assert.equal(desktop.nativeStyle({lyricFontSize:16}).fontSize,16,'Inherit native sizes below the custom slider minimum');
+	const split=desktop.nativeStyle({lyricComposition:'vertical',lyricLineMode:0,lyricDoubleLineAlign:1});
+	assert(split.vertical&&split.doubleLine);assert.equal(split.align,'split');
+	assert.deepEqual([0,2,3].map(lyricDoubleLineAlign=>desktop.nativeStyle({lyricLineMode:0,lyricDoubleLineAlign}).align),['center','left','right']);
+	assert.equal(desktop.nativeStyle({lyricLineMode:1,lyricOneLineAlign:3,lyricDoubleLineAlign:1}).align,'right');
 	const yrc='[1500,2000](1500,500,0)空(2000,1000,0)をみる';
 	const timed=desktop.attachWords([{time:1,text:'空 をみる'}],yrc,.5)[0];
 	assert.deepEqual(timed.words,[{from:0,to:1,start:1,end:1.5},{from:2,to:5,start:1.5,end:2.5}]);assert.equal(desktop.highlightTo(timed,1.4),1);assert.equal(desktop.highlightTo(timed,1.5),5);
@@ -72,6 +76,7 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	const f=fixture();f.host.sync();assert.equal(f.sessions.length,0,'Disabled means no renderer or playback listeners');
 	f.api.set('desktopEnabled',true);await until(()=>f.host.inspect().ready);const first=f.sessions[0];
 	assert.equal(first.frames[0].fontSize,35,'Inherit original desktop font size');assert.equal(first.frames[0].style.fontFamily,'微软雅黑');
+	assert.equal(first.frames[0].rtWeight,'400');
 	assert.equal(first.frames[0].style.colorBottom,'#ffb0b0');assert.equal(first.frames[0].translation,'看天空');assert(f.visibility.some(v=>v.hidden));
 	assert.equal(first.frames[0].reserveSecondary,true,'Enabled secondary lines keep their slot even when a translation is missing');
 	f.data={...f.data,style:{...f.data.style,mode:'roman'},lines:[{...f.data.lines[0],romaji:'so ra wo mi ru'},f.data.lines[1]]};f.nativeNotify();await until(()=>first.frames.at(-1).translation==='so ra wo mi ru');f.data={...f.data,style:{...f.data.style,mode:'translate'}};f.nativeNotify();await until(()=>first.frames.at(-1).translation==='看天空');
@@ -80,6 +85,19 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	f.data={...f.data,lines:[{...f.data.lines[0],words:[{from:0,to:1,start:1.4,end:1.8},{from:1,to:4,start:1.8,end:2.4}]},f.data.lines[1]]};f.nativeNotify();await until(()=>first.frames.at(-1).karaoke);
 	const cached=f.resolutions;clock('1|play',1.5);await until(()=>first.frames.at(-1).highlightTo===1);clock('1|play',1.9);await until(()=>first.frames.at(-1).highlightTo===4);assert.equal(f.resolutions,cached,'Word highlighting reuses readings');
 	f.api.set('rtSize',45);f.api.set('rtOpacity',37);await until(()=>first.frames.at(-1).rtSize===45&&first.frames.at(-1).rtOpacity===37);
+	f.api.set('rtWeight','700');await until(()=>first.frames.at(-1).rtWeight==='700');
+	const horizontal=first.frames.at(-1);
+	f.data={...f.data,style:{...f.data.style,vertical:true,doubleLine:true,align:'split'}};f.nativeNotify();
+	await until(()=>first.frames.at(-1).style.vertical);
+	const vertical=first.frames.at(-1);
+	assert.equal(f.sessions.length,1,'Switching orientation must not restart the host');
+	assert(!f.visibility.some(v=>!v.hidden),'Switching orientation must not reveal the native window');
+	assert.deepEqual(vertical.segments,horizontal.segments);assert.equal(vertical.translation,horizontal.translation);
+	assert.equal(vertical.highlightTo,horizontal.highlightTo);assert.equal(vertical.style.align,'split');
+	assert.equal(vertical.next.translation,'前往小镇');assert.equal(vertical.rtWeight,'700');
+	f.api.set('rtWeight','follow');await until(()=>first.frames.at(-1).rtWeight==='follow');
+	f.data={...f.data,style:{...f.data.style,vertical:false,doubleLine:false,align:'center'}};f.nativeNotify();
+	await until(()=>!first.frames.at(-1).style.vertical);assert.equal(f.sessions.length,1);
 	f.api.set('karaoke',false);await until(()=>!first.frames.at(-1).karaoke);const plainFrames=first.frames.length;clock('1|play',2.1);await tick();assert.equal(first.frames.length,plainFrames,'Disabling karaoke stops per-word updates');f.api.set('karaoke',true);
 	f.reading='あおぞら';f.notify();await until(()=>first.frames.at(-1).segments[0].rt==='あおぞら');
 	clock('1|play',4.2);await until(()=>first.frames.at(-1).translation==='前往小镇');
@@ -89,6 +107,8 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	await first.emit({type:'bounds',value:{x:12,y:34,width:700}});await until(()=>f.config.desktopBounds);assert.equal(f.config.desktopBounds.width,700);
 	f.api.set('desktopInheritStyle',false);f.api.set('desktopFontSize',54);f.api.set('desktopTranslation',false);await until(()=>first.frames.at(-1).fontSize===54);assert.equal(first.frames.at(-1).translation,'');
 	assert.equal(first.frames.at(-1).reserveSecondary,false,'Turning off secondary text releases its slot');
+	f.data={...f.data,style:{...f.data.style,vertical:true}};f.nativeNotify();await until(()=>first.frames.at(-1).style.vertical);
+	assert.equal(first.frames.at(-1).fontSize,54,'Native orientation also works with a custom desktop size');
 	f.data={...f.data,lines:[{time:1,text:'作詞: 空ゆい子',translation:''}]};f.nativeNotify();clock('1|play',1.1);await until(()=>first.frames.at(-1).segments.map(s=>s.text).join('')==='作詞: 空ゆい子');assert(!first.frames.at(-1).segments.some(s=>s.rt),'Credit skipping must also guard raw dictionary adapters');
 	f.api.set('skipCredits',false);await until(()=>first.frames.at(-1).segments.some(s=>s.rt));f.api.set('skipCredits',true);await until(()=>!first.frames.at(-1).segments.some(s=>s.rt));
 	f.data={...f.data,songId:'2',playId:'2|play',currentText:'',lines:[]};f.nativeNotify();clock('1|play',90);await until(()=>first.frames.at(-1).message==='暂无歌词');assert.equal(first.frames.at(-1).segments.length,0,'Track changes clear stale text');
@@ -99,5 +119,5 @@ function fixture({delay=false,fail=false,bridgeAvailable=true}={}){
 	const bad=fixture({fail:true});bad.api.set('desktopEnabled',true);await until(()=>!bad.config.desktopEnabled);assert.match(bad.host.inspect().status,/组件启动失败/);assert(!bad.visibility.some(v=>v.hidden));bad.host.dispose();
 	const race=fixture({delay:true});race.api.set('desktopEnabled',true);await until(()=>race.sessions.length);race.api.set('desktopEnabled',false);race.release();await until(()=>race.sessions[0].stopped);assert(!race.visibility.some(v=>v.hidden),'Late startup cannot hide the original window');race.host.dispose();
 	const nativeRace=fixture({delay:true});nativeRace.api.set('desktopEnabled',true);await until(()=>nativeRace.sessions.length);nativeRace.data={...nativeRace.data,nativeVisible:false};nativeRace.nativeNotify();nativeRace.release();await until(()=>nativeRace.sessions[0].stopped);assert(nativeRace.config.desktopEnabled);assert.equal(nativeRace.visibility.length,0,'Closing native lyrics during startup cancels without changing native visibility');nativeRace.host.dispose();
-	console.log('Desktop passed: timeline units/offsets, native style inheritance, shared readings, stable-frame caching, seeks, track races, lock/actions, native close/reopen, visibility restore and cancellation.');
+	console.log('Desktop passed: timeline/offsets, weight, live orientation, split alignment, shared readings, stable-frame caching, seeks, track races, lock/actions, native visibility and cancellation.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -47,11 +47,12 @@
 	const color=(value,fallback)=>/^[a-f0-9]{6}$/i.test(String(value||''))?'#'+value:fallback;
 	function nativeStyle(s={}){
 		const colors=Array.isArray(s.lyricColor)?s.lyricColor:[],outline=Array.isArray(s.lyricOutLine)?s.lyricOutLine:[];
-		const align=s.lyricLineMode?['center','center','left','right'][s.lyricOneLineAlign]:['center','left','left','right'][s.lyricDoubleLineAlign];
+		const doubleLine=s.lyricLineMode===0;
+		const align=doubleLine?['center','split','left','right'][s.lyricDoubleLineAlign]:['center','center','left','right'][s.lyricOneLineAlign];
 		return {fontFamily:String(s.lyricFont&&s.lyricFont!=='默认'?s.lyricFont:s.lyricFontDefault||'Microsoft YaHei'),fontSize:clamp(Number(s.lyricFontSize)||36,8,144),bold:Number(s.lyricFontStyle)===1,
 			colorTop:color(colors[2],'#ffdede'),colorBottom:color(colors[3],'#ffb0b0'),outline:!!s.lyricFontOutlineEnabled,outlineColor:color(outline[1],'#cb7474'),
 			unplayedColorTop:color(colors[0],'#eeeeee'),unplayedColorBottom:color(colors[1],'#eeeeee'),unplayedOutlineColor:color(outline[0],'#999999'),
-			align:align||'center',topmost:s.lyricTop!==false,locked:!!s.desktopLyricLockState,mode:s.lyricMode||'none',showTranslation:s.lyricMode==='translate',doubleLine:s.lyricLineMode===0,vertical:s.lyricComposition==='vertical'};
+			align:align||'center',topmost:s.lyricTop!==false,locked:!!s.desktopLyricLockState,mode:s.lyricMode||'none',showTranslation:s.lyricMode==='translate',doubleLine,vertical:s.lyricComposition==='vertical'};
 	}
 	function bounds(value){if(!value||!['x','y','width'].every(k=>Number.isFinite(Number(value[k]))))return null;return {x:clamp(Number(value.x),-50000,50000),y:clamp(Number(value.y),-50000,50000),width:clamp(Number(value.width),240,10000)};}
 	const menuCleanup=new WeakMap();
@@ -116,16 +117,18 @@
 		function changed(text){if(status===text)return;status=text;if(api.changed)api.changed();}
 		function snapshot(){const data=api.snapshot({needCurrentText:position===null});if(data.songId!==track||data.playId!==playId){track=data.songId;playId=data.playId;position=null;signature='';revision++;}return data;}
 		function update(force=false,data=null){
-			if(!session||disposed)return;data=data||snapshot();const cfg=api.config(),style=cfg.desktopInheritStyle===false?{}:data.style||{};
+			if(!session||disposed)return;data=data||snapshot();const cfg=api.config(),native=data.style||{};
+			// The layout switch lives in the native menu, including with a custom desktop font.
+			const style=cfg.desktopInheritStyle===false?{vertical:!!native.vertical}:native,rtWeight=cfg.rtWeight||'400';
 			let index=lineAt(data.lines,position);if(position===null&&data.currentText)index=data.lines.findIndex(l=>l.text.trim()===data.currentText.trim());
 			const row=index>=0?data.lines[index]:null,next=style.doubleLine&&index+1<data.lines.length?data.lines[index+1]:null;
 			const karaoke=cfg.karaoke!==false&&!!(row&&row.words&&row.words.length),highlight=karaoke?highlightTo(row,position):null;
-			const sig=JSON.stringify([track,playId,revision,row,next,cfg.enabled,cfg.kana,cfg.rtSize,cfg.rtOpacity,cfg.karaoke,cfg.skipCredits,cfg.skipNoKanaLines,highlight,cfg.desktopFontSize,cfg.desktopTranslation,cfg.desktopTopmost,cfg.desktopBounds,style,data.playing,data.locked]);
+			const sig=JSON.stringify([track,playId,revision,row,next,cfg.enabled,cfg.kana,cfg.rtSize,cfg.rtOpacity,rtWeight,cfg.karaoke,cfg.skipCredits,cfg.skipNoKanaLines,highlight,cfg.desktopFontSize,cfg.desktopTranslation,cfg.desktopTopmost,cfg.desktopBounds,style,data.playing,data.locked]);
 			if(!force&&sig===signature)return;signature=sig;
 			const readingKey=JSON.stringify([revision,track,cfg.kana,cfg.readingSource,cfg.skipCredits,cfg.skipNoKanaLines]);if(readingRevision!==readingKey){readingCache.clear();readingRevision=readingKey;}
 			const readings=text=>{if(!cfg.enabled||api.skip&&api.skip(text))return[{text}];if(!readingCache.has(text)){if(readingCache.size>=4)readingCache.clear();readingCache.set(text,api.readings(text)||[{text}]);}return readingCache.get(text);};const mode=cfg.desktopInheritStyle===false?cfg.desktopTranslation!==false?'translate':'none':style.mode||'translate',secondary=line=>line?(mode==='roman'?line.romaji:mode==='translate'?line.translation:'')||'':'';
 			pending={segments:row?readings(row.text):[],translation:secondary(row),reserveSecondary:mode!=='none',fontSize:style.fontSize||cfg.desktopFontSize||36,style,
-				rtSize:cfg.rtSize,rtOpacity:cfg.rtOpacity,karaoke,highlightTo:highlight,topmost:style.topmost===undefined?cfg.desktopTopmost!==false:style.topmost,locked:!!data.locked,playing:!!data.playing,bounds:bounds(cfg.desktopBounds),
+				rtSize:cfg.rtSize,rtOpacity:cfg.rtOpacity,rtWeight,karaoke,highlightTo:highlight,topmost:style.topmost===undefined?cfg.desktopTopmost!==false:style.topmost,locked:!!data.locked,playing:!!data.playing,bounds:bounds(cfg.desktopBounds),
 				next:next?{segments:readings(next.text),translation:secondary(next)}:null,
 				message:row?'':!track?'等待播放歌曲':!data.lines.length?'暂无歌词':position===null?'等待播放进度':data.title||'前奏'};
 			return drain(generation);
@@ -163,7 +166,6 @@
 			if(!cfg.desktopEnabled||!cfg.enabled){if(session||starting){stop();changed('');}return;}
 			const data=snapshot();
 			if(data.eligible===false){if(session||starting)stop();changed(data.languageStatus||'当前歌词不含日语，使用原桌面歌词');return;}
-			if(cfg.desktopInheritStyle!==false&&data.style&&data.style.vertical){if(session||starting)stop();changed('竖排继续使用原桌面歌词；桌面注音暂支持横排');return;}
 			if(data.nativeVisible!==true){if(session||starting)stop(false);changed('打开网易云桌面歌词后显示注音');return;}
 			if(!session){open();return;}if(invalidate)revision++;update(false,data);
 			if(invalidate&&api.visibility)api.visibility(true).catch(e=>changed(e.message));
