@@ -32,8 +32,10 @@
 	}
 	const key = s => indexed(String(s || ''), VARIANTS).key;
 	function titleKey(s) {
-		// Punctuation and word boundaries can be part of the official title.
-		return queryTitle(s).toLowerCase().replace(/\s+/g, ' ');
+		// Ignore layout spaces between Japanese characters, but retain Latin word
+		// boundaries and title punctuation (Pr ay / Pray / PRAY. stay distinct).
+		return queryTitle(s).toLowerCase().replace(/\s+/g, ' ')
+			.replace(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々〆]) +(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々〆])/gu, '$1');
 	}
 	function stripTitleNote(title) {
 		const close = title[title.length - 1];
@@ -64,6 +66,29 @@
 			if(next)title=next;if(title===before)break;
 		}
 		return title.replace(/./gu,c=>VARIANTS[c]||c).trim();
+	}
+	function partialTitles(s) {
+		const title = queryTitle(s), chars = Array.from(title);
+		if (chars.length < 12) return [];
+		const length = Math.min(10, Math.floor(chars.length / 2));
+		let fragments = [chars.slice(0, length).join(''), chars.slice(-length).join('')];
+		if (!/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(title)) {
+			// Keep Latin words intact: Lil’ Goldfish can fall back to Goldfish,
+			// but a short/single-word title such as Pray gets no broad query.
+			const words = title.split(/\s+/);
+			if (words.length < 2) return [];
+			const take = list => {
+				let text = list[0];
+				for (const word of list.slice(1)) {
+					if (Array.from(text + ' ' + word).length > length) break;
+					text += ' ' + word;
+				}
+				return text;
+			};
+			fragments = [take(words), take([...words].reverse()).split(' ').reverse().join(' ')];
+		}
+		return [...new Set(fragments.map(text => text.trim()))]
+			.filter(text => Array.from(text).filter(c => /[\p{L}\p{N}]/u.test(c)).length >= 6 && titleKey(text) !== titleKey(title));
 	}
 	function utatenURL(value){
 		try{const input=String(value||'').trim();if(input.length>2048)throw new Error('URL too long');const u=new URL(input);
@@ -473,5 +498,5 @@
 		const characters = found.reduce((n, s) => n + s.length, 0);
 		return { hits: found.length, characters, accepted: found.length >= 2 && characters >= 24 && found.length / Math.min(8, targets.length) >= .25 };
 	}
-	return { key, titleKey, queryTitle, matches, allowedURL, utatenURL, searchURL, searchResults, nextUtatenSearchPage, parseUtaten, parseUtanet, validRecord, prepare, segmentsFor, kana, writtenKana, matchingPreviews, lyricEvidence };
+	return { key, titleKey, queryTitle, partialTitles, matches, allowedURL, utatenURL, searchURL, searchResults, nextUtatenSearchPage, parseUtaten, parseUtanet, validRecord, prepare, segmentsFor, kana, writtenKana, matchingPreviews, lyricEvidence };
 });
