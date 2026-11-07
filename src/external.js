@@ -313,12 +313,22 @@
 						fetched.set(candidate.url, data); return data;
 					}
 					const artists = [...new Set(track.artists.filter(a => typeof a === 'string' && a.trim()).map(a=>a.trim()))];
-					for(const artist of artists){
+					const partials = provider === 'utaten' ? core.partialTitles(track.title) : [];
+					for (const [index, artist] of artists.entries()) {
 						if(!alive(g))throw new Error('已取消');
 						const selected={...track,artists:[artist]};
 						if(provider==='utaten'||!searched){announce('正在按歌手搜索 · '+artist+'…');candidates=core.searchResults(await fetchDoc(core.searchURL(provider,selected),'搜索页面'),provider);searched=true;}
 						const exact=candidates.filter(c=>core.matches(c,selected));
 						if(exact.length===1){const data=await detail(exact[0]);if(data&&core.matches(data,selected))return data;}
+						// Broaden the first artist's query before rotating artists. The
+						// returned title must still match the complete original title.
+						if (index === 0) for (const title of partials) {
+							if (!alive(g)) throw new Error('已取消');
+							announce('正在按部分曲名与歌手搜索 · ' + artist + '…');
+							const rows = core.searchResults(await fetchDoc(core.searchURL(provider, { ...selected, title }), '部分曲名与歌手搜索'), provider);
+							const exact = rows.filter(candidate => core.matches(candidate, selected));
+							if (exact.length === 1) { const data = await detail(exact[0]); if (data && core.matches(data, selected)) return data; }
+						}
 					}
 					// Relax the artist only after strict matching fails; this remains one attempt.
 					const sameTitle = new Map();
@@ -329,19 +339,6 @@
 							if (!previous || (candidate.preview && !previous.preview)) sameTitle.set(candidate.url, candidate);
 						}
 					};
-					if (provider === 'utaten') {
-						announce('正在按曲名搜索 UtaTen…');
-						let url = core.searchURL(provider, track, true);
-						while (url) {
-							if (!alive(g)) throw new Error('已取消');
-							const doc = await fetchDoc(url, '仅按歌名搜索');
-							collect(core.searchResults(doc, provider));
-							url = core.nextUtatenSearchPage(doc, url);
-						}
-					} else collect(candidates);
-					if (!sameTitle.size) throw new Error('未找到同名歌曲');
-					if (!evidence) evidence = track.lyrics || (deps.lyrics ? await deps.lyrics(id) : []);
-					if (!evidence.length) throw new Error('歌手写法不同，缺少本曲歌词用于核对');
 					let checked = 0;
 					async function verify(queue) {
 						let verified = null;
@@ -357,13 +354,31 @@
 						}
 						return verified;
 					}
-					const queue = [...sameTitle.values()];
-					// A long search-result excerpt is stronger evidence than the title alone.
-					// If no preferred detail verifies, still check every other exact title.
-					const preferred = new Set(provider === 'utaten' ? core.matchingPreviews(evidence, queue) : []);
-					let verified = preferred.size ? await verify([...preferred]) : null;
-					if (!verified) verified = await verify(queue.filter(candidate => !preferred.has(candidate)));
-					if (verified) return verified;
+					// Full title-only search precedes partial title-only searches. Keep
+					// all exact-title candidates and deduplicate their detail requests.
+					for (const [index, title] of [track.title, ...partials].entries()) {
+						if (provider === 'utaten') {
+							announce(index ? '正在按部分曲名搜索 UtaTen…' : '正在按曲名搜索 UtaTen…');
+							let url = core.searchURL(provider, { ...track, title }, true);
+							while (url) {
+								if (!alive(g)) throw new Error('已取消');
+								const doc = await fetchDoc(url, index ? '仅按部分曲名搜索' : '仅按歌名搜索');
+								collect(core.searchResults(doc, provider));
+								url = core.nextUtatenSearchPage(doc, url);
+							}
+						} else collect(candidates);
+						if (!sameTitle.size) continue;
+						if (!evidence) evidence = track.lyrics || (deps.lyrics ? await deps.lyrics(id) : []);
+						if (!evidence.length) throw new Error('歌手写法不同，缺少本曲歌词用于核对');
+						const queue = [...sameTitle.values()];
+						// A long excerpt is stronger evidence, but cannot exclude other
+						// exact titles when no preferred detail verifies.
+						const preferred = new Set(provider === 'utaten' ? core.matchingPreviews(evidence, queue) : []);
+						let verified = preferred.size ? await verify([...preferred]) : null;
+						if (!verified) verified = await verify(queue.filter(candidate => !preferred.has(candidate)));
+						if (verified) return verified;
+					}
+					if (!sameTitle.size) throw new Error('未找到同名歌曲');
 					if (!checked && unusableDetail) throw unusableDetail;
 					throw new Error('同名歌曲的歌词片段不匹配');
 				}
