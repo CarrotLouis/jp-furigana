@@ -273,7 +273,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	failure = 'timeout'; panel.querySelector('[data-a="externalRetry"]').click();
 	await until(() => !win.JPFuriganaPlus.externalStatus().loading && win.JPFuriganaPlus.externalStatus().error.includes('curl error 28'));
 	for (const message of [panel.querySelector('.fg-external-status'), rnpMenu.querySelector('[data-status]')]) {
-		assert.match(message.textContent, /UtaTen：搜索页面：请求超时（curl error 28）/);
+		assert.match(message.textContent, /UtaTen：正在按歌手搜索 · 試験歌手：请求超时（curl error 28）/);
 		assert(!message.textContent.includes('暂未获取'));
 	}
 	assert.equal(win.JPFuriganaPlus.externalStatus().source, 'local');

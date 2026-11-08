@@ -73,7 +73,8 @@ function fixture(request) {
 
  const missing = fixture(async () => '<table></table>');
  await missing.client.load('5', metadata, settings);
- assert.deepEqual(missing.queries(), allQueries);
+ assert.deepEqual(missing.queries().slice(0, allQueries.length), allQueries);
+ assert.deepEqual(missing.calls.filter(url => new URL(url).searchParams.has('body')), core.lyricSearchQueries(lyrics), 'Native lyric search is the final fallback');
  assert.match(missing.client.inspect().error, /未找到同名歌曲/);
  assert(!missing.client.inspect().loading);
  assert(missing.client.inspect().manualSearch);

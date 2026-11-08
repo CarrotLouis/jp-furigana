@@ -22,7 +22,7 @@ async function until(test) { for (let n = 0; n < 100; n++) { if (test()) return;
 	await a.client.load('1', metadata, off);
 	assert.equal(calls, 1, 'Off must still perform the initial attempt');
 	assert.equal(a.client.inspect().loading, false);
-	assert.match(a.client.inspect().error, /UtaTen：搜索页面：请求超时（curl error 28）/);
+	assert.match(a.client.inspect().error, /UtaTen：正在按歌手搜索 · 試験歌手：请求超时（curl error 28）/);
 	// Empty HTTP 200 responses are service failures, not proof of no matching song.
 	calls = 0; const empty = fixture(async () => { calls++; return ' \n'; });
 	await empty.client.load('1', metadata, off);
