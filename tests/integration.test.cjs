@@ -253,7 +253,7 @@ const assertScreenshot = (mode = 'hiragana') => {
 	failure = 'timeout'; panel.querySelector('[data-a="externalRetry"]').click();
 	await until(() => !win.JPFurigana.externalStatus().loading && win.JPFurigana.externalStatus().error.includes('网络请求超时'));
 	for (const message of [panel.querySelector('.fg-external-status'), rnpMenu.querySelector('[data-status]')]) {
-		assert.match(message.textContent, /UtaTen：搜索页面：网络请求超时/);
+		assert.match(message.textContent, /UtaTen：正在按歌手搜索 · 試験歌手：网络请求超时/);
 		assert(!message.textContent.includes('暂未获取'));
 	}
 	assert.equal(win.JPFurigana.externalStatus().source, 'local');

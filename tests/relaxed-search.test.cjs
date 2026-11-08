@@ -75,7 +75,7 @@ const settings = { externalProvider: 'utaten', externalAutoRetry: 'failed' };
   if (url.includes('/search')) return '<link rel="next" href="/search?title=' + encodeURIComponent('試験曲') + '&page=2"><table>' + row('a') + '</table>';
   return page(lines);
  });
- await ambiguous.client.load('1', metadata, settings); assert.equal(ambiguous.files.size, 0); assert(ambiguous.client.inspect().status.includes('多个版本'));
+	await ambiguous.client.load('1', metadata, settings); assert.equal(ambiguous.files.size, 1); assert.equal(ambiguous.client.inspect().url, 'https://utaten.com/lyric/a/', 'A complete lyric match short-circuits equal versions');
  const insufficient = fixture(async url => url.includes('/search') ? '<table>' + row('a') + '</table>' : page([lines[0], '知らない名前を呼んでみたのです']));
  await insufficient.client.load('1', metadata, settings); assert.equal(insufficient.files.size, 0);
  let searches = 0, failed = false;

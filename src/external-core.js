@@ -8,7 +8,11 @@
 	// Only compare lyrics this way: preserve original glyphs/offsets, and do not
 	// rewrite search titles such as 廻廻奇譚 or broaden song/artist verification.
 	const LYRIC_VARIANTS = { ...VARIANTS,
-		彈: '弾', 焰: '焔', 廻: '回', 涂: '塗', 傳: '伝', 說: '説', 咒: '呪', 駈: '駆', 溯: '遡', 淚: '涙', 絕: '絶', 冲: '衝' };
+		彈: '弾', 焰: '焔', 廻: '回', 涂: '塗', 傳: '伝', 說: '説', 咒: '呪', 駈: '駆', 溯: '遡', 淚: '涙', 絕: '絶', 冲: '衝',
+		闻: '聞', 极: '極', 业: '業', 门: '門', 杀: '殺', 风: '風', 汤: '湯', 爱: '愛', 梦: '夢',
+		见: '見', 说: '説', 闭: '閉', 传: '伝', 归: '帰', 变: '変', 驱: '駆', 戶: '戸', 户: '戸',
+		线: '線', 纸: '紙', 绘: '絵', 繪: '絵', 远: '遠', 伤: '傷', 记: '記', 忆: '憶', 與: '与',
+		终: '終', 结: '結', 诗: '詩', 语: '語', 时: '時', 间: '間', 过: '過', 还: '還', 对: '対', 對: '対' };
 	const kana = (s, mode) => String(s).replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
 		.replace(/[ぁ-ゖ]/g, c => mode === 'katakana' ? String.fromCharCode(c.charCodeAt(0) + 0x60) : c);
 	// Website and user-written katakana carry spelling information. The global
@@ -34,7 +38,7 @@
 	function titleKey(s) {
 		// Ignore layout spaces between Japanese characters, but retain Latin word
 		// boundaries and title punctuation (Pr ay / Pray / PRAY. stay distinct).
-		return queryTitle(s).toLowerCase().replace(/\s+/g, ' ')
+		return queryTitle(s).toLowerCase().replace(/\s+/g, ' ').replace(/\s+([([~])/g, '$1').replace(/\s*([-–—])\s*/g, '$1')
 			.replace(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々〆]) +(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々〆])/gu, '$1');
 	}
 	function stripTitleNote(title) {
@@ -47,7 +51,7 @@
 			if (title[i] !== open || --depth !== 0) continue;
 			const note = title.slice(i + 1, -1).trim();
 			const work = /^(?:TV\s*)?(?:アニメ|テレビ|映画|ドラマ|劇場版|ゲーム|舞台|ミュージカル)/i.test(note) ||
-				/(?:主題歌|テーマ(?:曲|ソング)|挿入歌|劇中歌|オープニング|エンディング|タイアップ)/.test(note) ||
+				/(?:主題歌|テーマ(?:曲|ソング)|挿入歌|劇中歌|オープニング|エンディング|タイアップ|コラボ(?:曲|ソング)|CM\s*(?:曲|ソング)|18祭)/i.test(note) ||
 				/(?:^|[^a-z0-9])(?:OP|ED)(?:\s*(?:曲|テーマ))?$/i.test(note);
 			const version = /\b(?:feat(?:uring)?|ft|cover|remix|remaster(?:ed)?)\b|翻唱|カバー|リミックス|(?:^|\s)(?:live|acoustic)(?:\s+ver(?:sion)?\.?)?$/i.test(note);
 			return work || version ? title.slice(0, i).trimEnd() : title;
@@ -55,7 +59,7 @@
 		return title;
 	}
 	function queryTitle(s) {
-		let title=String(s||'').normalize('NFKC').trim();
+		let title=String(s||'').normalize('NFKC').replace(/[‘’ʼ]/g,"'").replace(/\.{3,}/g,'…').replace(/[〜～]/g,'~').trim();
 		for(let i=0;i<4;i++){
 			const before=title;
 			let next=stripTitleNote(title);
@@ -97,7 +101,9 @@
 		throw new Error('请输入有效的 UtaTen 歌词页链接（https://utaten.com/lyric/…/）');
 	}
 	function matches(candidate, track) {
-		const artistKeys=value=>String(value||'').split(/\s+(?:feat(?:uring)?\.?|ft\.?)(?![a-z])\s*/i).map(key).filter(Boolean);
+		const artistKeys=value=>String(value||'').normalize('NFKC').split(/\s+(?:feat(?:uring)?\.?|ft\.?)(?![a-z])\s*/i).flatMap(part=>[
+			part,part.replace(/\([^()]*\)/g,''),...[...part.matchAll(/\(([^()]*)\)/g)].map(m=>m[1].replace(/^\s*CV\s*[.:：]?\s*/i,''))
+		]).map(s=>indexed(s,LYRIC_VARIANTS).key).filter(Boolean);
 		return titleKey(candidate.title) === titleKey(track.title) && !!titleKey(track.title) &&
 			(track.artists || []).some(a => artistKeys(a).some(k=>(candidate.artists||[]).some(b=>artistKeys(b).includes(k))));
 	}
@@ -152,7 +158,10 @@
 			} else return null;
 			const page = Number(current.searchParams.get('page') || 1) + 1;
 			if (!Number.isSafeInteger(page) || Number(params.get('page')) !== page ||
-				!params.get('title') || titleKey(params.get('title')) !== titleKey(current.searchParams.get('title')) || params.get('artist_name')) return null;
+				!['title','artist_name','body'].some(field=>current.searchParams.get(field)) ||
+				['title','artist_name','body'].some(field=>field==='title'
+					? titleKey(params.get(field))!==titleKey(current.searchParams.get(field))
+					: (params.get(field)||'')!==(current.searchParams.get(field)||''))) return null;
 			// Only use the site's next-page number, preserving the original query.
 			current.searchParams.set('page', String(page));
 			return current.href;
@@ -481,22 +490,79 @@
 		return normalize(resolveSegments(target,groups,mode,fromRomaji));
 	}
 
-	function lyricKeys(lines) {
-		return (lines || []).filter(s => typeof s === 'string' && !/作詞|作曲|編曲|作词|作曲|编曲|lyrics|composer|arrang/i.test(s)).map(s => indexed(s).key);
+	const lyricKey = text => kana(indexed(text).key, 'hiragana');
+	function lyricTexts(lines) {
+		return (lines || []).filter(s => typeof s === 'string' && s.length <= 4000 && !core.isCreditLine(s) &&
+			!/^\s*(?:origin|vocal|lyrics|composer|arrange(?:ment)?|原曲)\s*[:：]/i.test(s)).slice(0, 2000);
+	}
+	function comparisonText(text) {
+		// Search/comparison only; the displayed text and chorus parentheses are
+		// never rewritten. Keep repeats such as 遠く(遠く), which contain kanji.
+		return text.normalize('NFKC').replace(/([\p{Script=Han}々]+)\s*\([ぁ-ゖァ-ヺー\s・]+\)/gu, '$1');
+	}
+	function lyricKeys(lines) { return lyricTexts(lines).map(s => lyricKey(comparisonText(s))); }
+	function lyricSearchQueries(lines) {
+		const pool = [];
+		for (const [line, text] of lyricTexts(lines).entries()) {
+			const clean = comparisonText(text).replace(/./gu, c => LYRIC_VARIANTS[c] || c);
+			for (const run of clean.match(/[\p{Script=Han}ぁ-ゖァ-ヺー]+/gu) || []) {
+				if (run.length < 8) continue;
+				const value = run.slice(0, 20), diversity = new Set(value).size;
+				if (diversity < 6) continue;
+				pool.push({ value, line, score: value.length * .5 + diversity * .6 + (value.match(/\p{Script=Han}/gu) || []).length * .8 });
+			}
+		}
+		pool.sort((a, b) => b.score - a.score || a.line - b.line);
+		const selected = [];
+		for (const entry of pool) {
+			if (selected.some(p => p.line === entry.line || p.value.includes(entry.value) || entry.value.includes(p.value))) continue;
+			selected.push(entry); if (selected.length === 6) break;
+		}
+		return selected.map(p => 'https://utaten.com/search?body=' + encodeURIComponent(p.value));
 	}
 	function matchingPreviews(lines, candidates) {
 		const lyrics = lyricKeys(lines).join('');
 		return candidates.filter(({ preview }) => {
-			const snippet = preview ? indexed(preview).key : '';
+			const snippet = preview ? lyricKey(comparisonText(preview)) : '';
 			return snippet.length >= 24 && lyrics.includes(snippet);
 		});
 	}
 	function lyricEvidence(lines, record) {
-		const targets = [...new Set(lyricKeys(lines))].filter(s => s.length >= 8 && /[ぁ-ゖァ-ヶ一-龯]/.test(s));
-		const sources = prepare(record).map(g => g.key);
-		const found = targets.filter(t => sources.some(s => s === t || t.length >= 12 && s.includes(t)));
+		const originals = lyricTexts(lines), sourceLines = lyricTexts(record.lines.map(l => l.text));
+		const keys = lyricKeys(originals), source = lyricKeys(sourceLines).join(''), target = keys.join('');
+		const targets = [...new Set(keys)].filter(s => s.length >= 8 && /[ぁ-ゖ一-龯]/.test(s));
+		const found = targets.filter(t => source.includes(t));
 		const characters = found.reduce((n, s) => n + s.length, 0);
-		return { hits: found.length, characters, accepted: found.length >= 2 && characters >= 24 && found.length / Math.min(8, targets.length) >= .25 };
+		const grams = text => { const set = new Set(); for (let i = 0; i < text.length - 2; i++) set.add(text.slice(i, i + 3)); return set; };
+		const a = grams(target), b = grams(source); let common = 0; for (const gram of a) if (b.has(gram)) common++;
+		const coverage = a.size ? common / a.size : 0, sourceCoverage = b.size ? common / b.size : 0;
+		const lineCoverage = characters / (targets.reduce((n, s) => n + s.length, 0) || 1);
+		// A full-stream equality is stronger than any number of isolated excerpts.
+		// With inline readings, also require the website ruby at the same offset;
+		// merely deleting a possible vocal repeat must not trigger an early return.
+		let complete = !!target && originals.map(lyricKey).join('') === sourceLines.map(lyricKey).join('');
+		if (!complete && target && target === source && record.provider === 'utaten') {
+			const ruby = []; let offset = 0;
+			for (const l of record.lines) {
+				if (!lyricTexts([l.text]).length) continue;
+				for (const s of l.segments) { const length = lyricKey(s.text).length; if (s.rt) ruby.push({ start: offset, end: offset + length, rt: kana(s.rt, 'hiragana') }); offset += length; }
+			}
+			let at = 0; complete = true;
+			for (const text of originals) {
+				const normalized = text.normalize('NFKC'); let removed = 0;
+				for (const m of normalized.matchAll(/([\p{Script=Han}々]+)\s*\(([ぁ-ゖァ-ヺー\s・]+)\)/gu)) {
+					const end = at + lyricKey(normalized.slice(0, m.index) + m[1]).length - removed, start = end - lyricKey(m[1]).length;
+					const rt = kana(m[2].replace(/[\s・]/g, ''), 'hiragana');
+					if (!ruby.some(r => r.start === start && r.end === end && r.rt === rt)) complete = false;
+					removed += lyricKey(m[0]).length - lyricKey(m[1]).length;
+				}
+				at += lyricKey(comparisonText(text)).length;
+			}
+		}
+		const accepted = complete && target.length >= 24 || found.length >= 2 && characters >= 24 && coverage >= .35 || a.size >= 60 && coverage >= .65;
+		const harmonic = coverage + sourceCoverage ? 2 * coverage * sourceCoverage / (coverage + sourceCoverage) : 0;
+		return { hits: found.length, characters, accepted, complete, coverage, sourceCoverage,
+			score: complete ? 1 : .6 * coverage + .2 * harmonic + .2 * lineCoverage, localCharacters: target.length, sourceCharacters: source.length };
 	}
-	return { key, titleKey, queryTitle, partialTitles, matches, allowedURL, utatenURL, searchURL, searchResults, nextUtatenSearchPage, parseUtaten, parseUtanet, validRecord, prepare, segmentsFor, kana, writtenKana, matchingPreviews, lyricEvidence };
+	return { key, titleKey, queryTitle, partialTitles, matches, allowedURL, utatenURL, searchURL, searchResults, nextUtatenSearchPage, parseUtaten, parseUtanet, validRecord, prepare, segmentsFor, kana, writtenKana, matchingPreviews, lyricEvidence, lyricSearchQueries };
 });
