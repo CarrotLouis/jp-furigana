@@ -13,11 +13,11 @@
 
 	const LOG = '[jp-furigana-plus]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFuriganaPlus.build）
-	const BUILD = 'standalone-1.6.3-lyric-search-ranking';
+	const BUILD = 'standalone-1.6.3-inline-ruby-priority';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana-plus.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
-	const CACHE_KEY = 'jp-furigana-plus.cache.v8';
+	const CACHE_KEY = 'jp-furigana-plus.cache.v9';
 	const CACHE_LIMIT = 4000;
 
 	const DEFAULTS = {
@@ -209,7 +209,7 @@
 	const cache = new Map();
 	try {
 		localStorage.removeItem('jp-furigana-plus.cache.v3'); // obsolete results could include missing readings
-		for(const version of ['v4','v5','v6','v7'])localStorage.removeItem(CACHE_KEY.replace(/v8$/,version));
+		for(const version of ['v4','v5','v6','v7','v8'])localStorage.removeItem(CACHE_KEY.replace(/v9$/,version));
 		const raw = JSON.parse(localStorage.getItem(CACHE_KEY));
 		if (raw && typeof raw === 'object')
 			for (const k of Object.keys(raw)) cache.set(k, raw[k]);

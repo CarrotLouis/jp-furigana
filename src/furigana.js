@@ -30,10 +30,10 @@
 	const LATIN = 'A-Za-z0-9Ａ-Ｚａ-ｚ０-９';
 	const RE_LATIN_RUN = new RegExp(`[${LATIN}](?:[${LATIN}\\s'’.,!?&\\-]*[${LATIN}])?`, 'g');
 	// 歌词里的括号：作词者自带的注音「漢字（かな）」，或者和声、注释
-	// Candidates only: kana parentheses are not automatically ruby (choruses
-	// can have the same shape). Confirm them against the preceding pronunciation.
+	// Word-attached kana can deliberately override the dictionary reading.
+	// Keep backing sounds/phrases and reconsider possible echoes with line evidence.
 	const RE_RUBY_BASE = new RegExp(`[0-9０-９]*[${KANJI}][${KANJI}ぁ-ゖァ-ヺー]*$`);
-	const RE_KATA_BASE = new RegExp(`[0-9０-９]*[${KANJI}]+$`);
+	const RE_KANJI_BASE = new RegExp(`[0-9０-９]*[${KANJI}]+$`);
 	const RE_PAREN = /[（(][^（）()]*[）)]/g;
 
 	function toHiragana(s) {
@@ -1059,7 +1059,7 @@
 	function segmentsFromDictionary(tokenizer,text,opts={}) {
 		const raw=tokensToSegments(tokenizeForReading(tokenizer,text),{...opts,inlineRuby:false});
 		const notes=inlineRubyRanges(text,raw);
-		if(notes.some(r=>!r.confirmed)&&text.length<=4096) {
+		if(notes.some(r=>!r.confirmed||readingBefore(raw,r.mid,r.rt,r.from)===null)&&text.length<=4096) {
 			const bases=new Map(inlineRubyRanges(text).map(r=>[r.mid,r.from]));
 			// YRC can interrupt an inflected word: 揺(ゆ)れる becomes a noun
 			// 揺(ゆら) if tokenized literally. Check the uninterrupted word first;
@@ -1083,9 +1083,9 @@
 			const location=at=>{let lo=0,hi=offsets.length;while(lo<hi){const mid=(lo+hi)>>1;if(offsets[mid]<at)lo=mid+1;else hi=mid;}return lo;};
 			let inflectionChecks=0;
 			for(const r of notes) {
-				if(r.confirmed)continue;
 				const end=location(r.mid),start=readingBefore(context,end,r.rt,location(bases.get(r.mid)));
 				if(start===null) {
+					if(r.confirmed)continue; // Keep a deliberate special reading's full base.
 					// Some lyric spellings give only part of a verb reading, e.g.
 					// 結(む)すんで. The literal spelling 結すんで has no matching
 					// dictionary stem. Confirm the supplied kana + following okurigana
@@ -1148,6 +1148,25 @@
 		}
 		return null;
 	}
+	function pronunciationBetween(units, from, to) {
+		let spoken='',cursor=from;
+		for(const {s,start,end} of units) {
+			if(end<=from||start>=to)continue;
+			if(start>cursor||s.rt&&(start<from||end>to))return null;
+			const part=pronunciation(s.rt||s.text.slice(Math.max(0,from-start),Math.min(end,to)-start));
+			if(part===null)return null;spoken+=part;cursor=Math.min(end,to);
+		}
+		return cursor===to?spoken:null;
+	}
+	function backingSound(reading) {
+		const rt=pronunciation(reading);
+		// Repeated words such as ここ / いろいろ may be semantic readings.
+		// Only common wordless backing patterns are excluded on their shape alone.
+		if(!rt)return false;
+		const vowels=rt.replace(/ー/g,'').replace(/[ァィゥェォ]/g,c=>({ァ:'ア',ィ:'イ',ゥ:'ウ',ェ:'エ',ォ:'オ'}[c]));
+		return /^([アイウエオ])\1+$/.test(vowels)||/^(?:[アイウエオ]|ウォ|イェ|イエ)ー+$/.test(rt)||
+			/^(ラ|ル|ハ|ドゥー?|シャラ)\1+$/.test(rt)||/^(ナ|バ|パ|タ|ダ)\1{2,}$/.test(rt);
+	}
 	function inlineRubyRanges(text, segments) {
 		const output=[],units=segments&&positioned(segments);
 		for(const m of text.matchAll(RE_PAREN)) {
@@ -1157,15 +1176,23 @@
 			if(!rt || !/^[ぁ-ゖァ-ヺー]+$/.test(rt) || rt.length>256)continue;
 			const prefix=text.slice(0,m.index).replace(/\s+$/u,''),base=RE_RUBY_BASE.exec(prefix);
 			if(!base)continue;
-			// A written loanword can deliberately replace the dictionary reading:
-			// 旋律(メロディ), 風景画(ペサージュ). Keep obvious vocal repeats as lyrics.
-			const chorus=katakana&&(/^[アイウエオァィゥェォー]+$/.test(rt)||/^([ァ-ヺ]{1,3}ー?)\1+$/.test(rt));
-			const word=katakana&&!chorus&&RE_KATA_BASE.exec(prefix);
+			// Both scripts can supply a special reading: 霊(まぼろし), 旋律(メロディ).
+			// Do not require that reading to agree with the source being corrected.
+			const attached=RE_KANJI_BASE.exec(prefix),want=pronunciation(rt);
+			const literal=attached&&units&&pronunciationBetween(units,attached.index,prefix.length);
+			const phrase=literal&&want&&want.startsWith(literal)&&/^(ハ|ガ|ヲ|ニ|ヘ|ト|モ|デ|カラ|マデ|ダケ|ナラ|ヨリ|コソ)$/.test(want.slice(literal.length));
+			const word=attached&&!backingSound(rt)&&!phrase?attached:null;
 			const r={from:word?word.index:base.index,mid:prefix.length,open:m.index,to:m.index+m[0].length,rt,confirmed:!!word};
 			if(katakana)r.script='katakana';
 			if(segments) {
 				const from=readingBefore(segments,r.mid,rt,r.from);
-				if(from!==null){r.from=from;r.confirmed=true;}
+				if(from!==null){
+					r.from=from;r.confirmed=true;
+					// A split dictionary stem can already contain the preceding
+					// kanji's reading, e.g. 罅 + 裂(ひびわ). Avoid ひび + ひびわ.
+					const overlap=word&&from>word.index&&pronunciationBetween(units,word.index,from);
+					if(overlap&&want.startsWith(overlap)&&want.length>overlap.length)r.from=word.index;
+				}
 				else if(!word) {
 					// An irregular reading needs whole-line evidence. Limit its base to
 					// the nearest dictionary kanji unit, rather than the entire phrase.
