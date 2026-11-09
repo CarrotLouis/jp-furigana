@@ -24,7 +24,7 @@ kuromoji.builder({dicPath:path.resolve(__dirname,'../src/dict')}).build(async(er
   const mixedResult=dict(mixed);verify(mixedResult,mixed);assert.deepEqual(hidden(mixedResult),[' ( とびら )']);
   assert.equal(visible(mixedResult),'扉 の向こう（君の声）へ進む（もう一度）');
   for(const word of ['君','声','一度'])assert(mixedResult.some(s=>s.text===word&&s.rt),'Chorus kanji remains annotated: '+word);
-  for(const text of ['光(ああ)を抱く','君（きみと）歌う','花(わな)を見る','Hello (la la)','あした（もういちど）','扉（とびら','扉 とびら）']) {
+  for(const text of ['光(ああ)を抱く','君（きみと）歌う','Hello (la la)','あした（もういちど）','扉（とびら','扉 とびら）']) {
    const s=dict(text);verify(s,text);assert.equal(visible(s),text,'Do not hide ordinary, uncertain or incomplete parentheses: '+text);
   }
   const okurigana='持ち帰る（もちかえる ）夢',okuriganaResult=dict(okurigana);verify(okuriganaResult,okurigana);assert.equal(visible(okuriganaResult),'持ち帰る夢');
@@ -37,10 +37,11 @@ kuromoji.builder({dicPath:path.resolve(__dirname,'../src/dict')}).build(async(er
   const echoResult=convert(echo,echoReading);verify(echoResult,echo);assert.equal(visible(echoResult),'星と空(そら)をみる');assert.deepEqual(hidden(echoResult),['(ほし)']);
   const prehidden=dict(echo),reconsidered=core.segmentsFromReading(echo,core.romajiToKana(echoReading),prehidden);assert.equal(visible(reconsidered),visible(echoResult),'Previously hidden dictionary notes can be restored as a sung echo');
   const ambiguous='空(そら)空(そら)',ambiguousResult=convert(ambiguous,'so ra so ra so ra');verify(ambiguousResult,ambiguous);assert.equal(visible(ambiguousResult),ambiguous,'Ambiguous note locations are retained');
-  const irregular='宇宙(そら)を見る';assert.equal(visible(dict(irregular)),irregular,'Unconfirmed irregular readings remain visible without a source');
+  const irregular='宇宙(そら)を見る';assert.equal(visible(dict(irregular)),'宇宙を見る','An explicit word-attached reading overrides a conflicting dictionary');
+  const unusual=dict('花(わな)を見る');assert.equal(visible(unusual),'花を見る');assert(unusual.some(s=>s.text==='花'&&s.rt==='わな'),'Written readings need not resemble the dictionary reading');
   const irregularResult=convert(irregular,'so ra wo mi ru');verify(irregularResult,irregular);assert.equal(visible(irregularResult),'宇宙を見る');assert(irregularResult.some(s=>s.text==='宇宙'&&s.rt==='そら'));
   const english='扉(とびら)で Hello',englishResult=convert(english,'to bi ra de Hello');verify(englishResult,english);assert.equal(visible(englishResult),'扉で Hello','Unknown Latin portions must not stop confirmed note cleanup');
-  const unknown='鵺(ぬえ)をみる';assert.equal(visible(core.tokensToSegments([{surface_form:unknown,word_type:'UNKNOWN'}])),unknown);
+  const unknown='鵺(ぬえ)をみる',unknownResult=core.tokensToSegments([{surface_form:unknown,word_type:'UNKNOWN'}]);verify(unknownResult,unknown);assert.equal(visible(unknownResult),'鵺をみる');assert(unknownResult.some(s=>s.text==='鵺'&&s.rt==='ぬえ'),'A written reading does not require a dictionary entry');
   // A synthetic external page keeps its chorus, while the client's additional
   // annotation is hidden. Neither cached website text nor source readings change.
   const lyric=site([{text:'星',rt:'ほし'},{text:'と'},{text:'空',rt:'そら'},{text:'(そら)をみる'}]);

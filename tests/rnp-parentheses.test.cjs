@@ -19,6 +19,12 @@ const samples=[
  {lrc:'旋律（メロディ）と風琴（ハーモニカ）',yrc:'旋律（メロディ）と風琴（ハーモニカ）',visible:'旋律と風琴',nativeVisible:'旋律と風琴',roma:'se n ri tsu to fu u ki n',pairs:[['旋律','メロディ'],['風琴','ハーモニカ']]},
  {lrc:'少女（モニカ）の風景画（ペサージュ）',yrc:'少女（モニカ）の風景画（ペサージュ）',visible:'少女の風景画',nativeVisible:'少女の風景画',roma:'sho u jo no fu u ke i ga',pairs:[['少女','モニカ'],['風景画','ペサージュ']]},
  {lrc:'君の声（ラララ）',yrc:'君の声（ラララ）',roma:'ki mi no ko e ra ra ra',pairs:[['声','こえ']]},
+ {lrc:'歔欷(すすりな)く風',yrc:'歔欷(すすりな)く風',visible:'歔欷く風',nativeVisible:'歔欷く風',roma:'kyo ki ku ka ze',pairs:[['歔欷','すすりな']]},
+ {lrc:'罅裂(ひびわ)れた隙間',yrc:'罅裂(ひびわ)れた隙間',visible:'罅裂れた隙間',nativeVisible:'罅裂れた隙間',roma:'ka re tsu re ta su ki ma',pairs:[['罅裂','ひびわ']]},
+ {lrc:'その背中(せな)を',yrc:'その背中(せな)を',visible:'その背中を',nativeVisible:'その背中を',roma:'so no se na ka wo',pairs:[['背中','せな']]},
+ {lrc:'反映(うつ)し出す',yrc:'反映(うつ)し出す',visible:'反映し出す',nativeVisible:'反映し出す',roma:'ha n e i shi da su',pairs:[['反映','うつ']]},
+ {lrc:'霊(まぼろし)の桜よ',yrc:'霊(まぼろし)の桜よ',visible:'霊の桜よ',nativeVisible:'霊の桜よ',roma:'re i no sa ku ra yo',pairs:[['霊','まぼろし']]},
+ {lrc:'黄泉の間(あわい)で',yrc:'黄泉の間(あわい)で',visible:'黄泉の間で',nativeVisible:'黄泉の間で',roma:'yo mi no a i da de',pairs:[['間','あわい']]},
 ];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const textOf=(node,visible=false)=>{const copy=node.cloneNode(true);for(const n of copy.querySelectorAll('.fg-rt,rt,.rnp-karaoke-word-filler'+(visible?',.fg-hide':'')))n.remove();return copy.textContent;};
@@ -36,7 +42,7 @@ kuromoji.builder({dicPath:path.join(src,'dict')}).build(async(error,tokenizer)=>
    for(const p of proof)if(p.rt)assert.equal(s.yrc.slice(p.at,p.at+p.text.length),p.text,'Context lookup preserves original UTF-16 offsets');
    assert.equal(core.romajiForLine(new Map([[core.lyricKey(s.lrc),s.roma]]),s.yrc,proof),s.roma);
   }
-  for(const text of ['光（ああ）を抱く','君（きみと）歌う','宇宙（そら）を見る','歌（君の声と星(ほし)）']) {
+  for(const text of ['光（ああ）を抱く','君（きみと）歌う','歌（君の声と星(ほし)）']) {
    const result=core.segmentsFromDictionary(tokenizer,text);
    assert.equal(result.filter(s=>!s.hidden).map(s=>s.text).join(''),text==='歌（君の声と星(ほし)）'?'歌（君の声と星）':text,'Context tokenization must not erase normal or uncertain choruses');
   }
@@ -60,9 +66,18 @@ kuromoji.builder({dicPath:path.join(src,'dict')}).build(async(error,tokenizer)=>
     win[plus?'kuromojiFuriganaPlus':'kuromoji']={builder:()=>({build:cb=>cb(null,tokenizer)})};
     win.fetch=async url=>{assert.equal(new URL(url).hostname,'music.163.com','Selected dictionary/official sources must not request external websites');return {ok:true,json:async()=>({lrc:{lyric:samples.map((s,i)=>`[00:${String(i+1).padStart(2,'0')}]${s.lrc}`).join('\n')},romalrc:{lyric:samples.map((s,i)=>`[00:${String(i+1).padStart(2,'0')}]${s.roma}`).join('\n')}})};};
     win.localStorage.setItem(manifest.slug+'.config',JSON.stringify({readingSource:'dict',desktopEnabled:false}));
+    // An upgrade must not reuse v8's still-visible parentheses/wrong readings.
+    const stale={};for(const s of samples)for(const text of new Set([s.lrc,s.yrc])) {
+     stale['d|hiragana|'+text]=[{text}];stale['raw|hiragana|'+text]=[{text}];
+     stale['r|hiragana|'+s.roma+'|'+text]=[{text}];
+    }
+    const other=(plus?'jp-furigana':'jp-furigana-plus')+'.cache.v8';
+    win.localStorage.setItem(manifest.slug+'.cache.v8',JSON.stringify(stale));win.localStorage.setItem(other,'other plugin cache');
     if(render.endsWith('noruby'))win.localStorage.setItem(manifest.slug+'.no-ruby','1');
     for(const {file} of manifest.injects.Main)if(!['kuromoji.js','desktop.js'].includes(file))win.eval(fs.readFileSync(path.join(src,file),'utf8'));
     await handlers.load();const api=win[ns];
+    assert.equal(win.localStorage.getItem(manifest.slug+'.cache.v8'),null,'Remove only the obsolete automatic annotation cache');
+    assert.equal(win.localStorage.getItem(other),'other plugin cache','Do not touch the other branch namespace');
     for(let i=0;i<100&&!api.state.tokenizer;i++)await sleep(30);
     for(const source of ['dict','romaji']) {
      api.set('readingSource',source);api.pass();await sleep(250);
@@ -93,6 +108,6 @@ kuromoji.builder({dicPath:path.join(src,'dict')}).build(async(error,tokenizer)=>
     assert(!win.document.querySelector('.fg-hide,.fg-rt'));
    } finally {win.close();}
   }
-  console.log('RNP parentheses passed: distinct LRC/YRC, actual dictionary, word stems and compounds, mixed chorus, echo, original/float/slide/no-ruby rendering, romaji lookup and disable restoration.');
+  console.log('RNP parentheses passed: distinct LRC/YRC, six reported irregular readings, word stems/compounds, mixed chorus/echo, native/original/float/slide/no-ruby rendering, stale-v8 migration, romaji lookup and disable restoration.');
  }catch(e){console.error(e);process.exitCode=1;}
 });
