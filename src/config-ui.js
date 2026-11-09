@@ -82,10 +82,11 @@
 				<div class="fg-hint">外部来源会联网获取并在本地保存歌词，请遵守来源网站使用条款。<a href="#" data-open="https://utaten.com/index/agreement">UtaTen 条款</a> · <a href="#" data-open="https://www.uta-net.com/info/kiyaku.html">歌ネット条款</a></div>
 				<h3>外部歌词</h3>
 				<div class="fg-row"><label>外部网站范围</label><select data-k="externalProvider">
-					<option value="auto">UtaTen 优先，歌ネット备用（推荐）</option>
-					<option value="utaten">仅查询 UtaTen 振假名</option>
+					<option value="auto">UtaTen 优先，歌ネット备用</option>
+					<option value="utaten">仅查询 UtaTen 振假名（推荐）</option>
 					<option value="utanet">仅查询歌ネット罗马音</option>
 				</select></div>
+				<div class="fg-hint" data-provider-warning hidden>uta-Net的注音质量较低，建议仅使用UtaTen进行注音</div>
 				<div class="fg-row"><label>自动重新获取</label><select data-k="externalAutoRetry">
 					<option value="off">关闭（仍会首次获取）</option>
 					<option value="failed">失败后自动重试（最多 3 次）</option>
@@ -151,6 +152,7 @@
 		function refreshStatus() {
 			const section = root.querySelector('.fg-external-settings');
 			section.hidden = config.readingSource !== 'external';
+			root.querySelector('[data-provider-warning]').hidden = config.externalProvider === 'utaten';
 			root.querySelector('.fg-consent-row').hidden = !config.externalConsent;
 			const client = api.externalClient();
 			const info = client && client.inspect();

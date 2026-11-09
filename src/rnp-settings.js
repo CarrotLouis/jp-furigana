@@ -42,6 +42,7 @@
 			group.innerHTML = '<div class="rnp-group-title">注音</div>' + checkbox('enabled', '振假名注音') +
 				select('readingSource', '读音来源', [['romaji', '网易云'], ['dict', '词典'], ['external', '外部网站']]) +
 				'<div data-external>' + select('externalProvider', '外部网站范围', [['auto', '自动'], ['utaten', 'UtaTen'], ['utanet', 'Uta-Net']]) +
+				'<p class="fg-rnp-note" data-provider-warning hidden>uta-Net的注音质量较低，建议仅使用UtaTen进行注音</p>' +
 				select('externalAutoRetry', '自动重新获取', [['off', '关闭'], ['failed', '失败后重试']]) +
 				'<div class="fg-rnp-actions"><button type="button" class="rnp-select-group-btn" data-action="retry">重新获取当前歌曲</button><button type="button" class="rnp-select-group-btn" data-action="source">查看来源网页</button><button type="button" class="rnp-select-group-btn" data-action="assign" title="支持手动指定 UtaTen 歌词页">手动指定歌词页</button></div>' +
 				'<p class="fg-rnp-note" role="status" data-status></p><div class="fg-rnp-search" data-search-fallback hidden></div></div>' +
@@ -80,6 +81,7 @@
 					button.classList.toggle('selected', selected); button.setAttribute('aria-pressed', String(selected));
 				}
 				group.querySelector('[data-external]').hidden = config.readingSource !== 'external';
+				group.querySelector('[data-provider-warning]').hidden = config.externalProvider === 'utaten';
 				const status = group.querySelector('[data-status]');
 				if (status.textContent !== info.text) status.textContent = info.text;
 				refreshSearchFallback();

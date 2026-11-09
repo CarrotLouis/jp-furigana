@@ -19,6 +19,7 @@
 			.fg-search-fallback button { padding:4px 8px; white-space:normal; }
 			.fg-search-fallback [role=status] { margin:0; font-size:.9em; opacity:.75; }
 		`;
+		style.textContent += '.fg-provider-notice .fg-dialog-actions{flex-wrap:wrap}.fg-provider-notice .fg-dialog-actions button{flex:1 1 165px;white-space:normal;color:#fff}.fg-provider-notice button[data-keep-provider]{background:#b43d43;border-color:#d7686d}.fg-provider-notice button[data-use-utaten]{background:#267a47;border-color:#54a574}';
 		doc.head.append(style);
 	}
 	function open(api,doc=document){
@@ -68,6 +69,22 @@
 		notices.set(doc,{cancel,promise});doc.body.append(backdrop);doc.addEventListener('keydown',escape,true);cancel.focus();
 		return promise;
 	}
+	const providerNotices = new WeakMap();
+	function recommendProvider(doc=document) {
+		if(providerNotices.has(doc))return providerNotices.get(doc);
+		ensureStyle(doc);
+		const previous=doc.activeElement,backdrop=doc.createElement('div');
+		backdrop.className='fg-source-backdrop';
+		backdrop.innerHTML='<div class="fg-source-dialog fg-provider-notice" role="alertdialog" aria-modal="true" aria-labelledby="fg-provider-title" aria-describedby="fg-provider-body"><h2 id="fg-provider-title">外部网站注音提示</h2><p id="fg-provider-body">uta-Net的注音质量较低，建议改为仅使用UtaTen进行注音</p><div class="fg-dialog-actions"><button type="button" data-keep-provider>保持当前选项</button><button type="button" data-use-utaten>改为使用UtaTen进行注音</button></div></div>';
+		let resolve;const promise=new Promise(r=>{resolve=r;});
+		function close(value){if(!backdrop.isConnected)return;doc.removeEventListener('keydown',escape,true);backdrop.remove();providerNotices.delete(doc);if(previous&&previous.isConnected)previous.focus();resolve(value);}
+		function escape(e){if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close(false);}}
+		const dialog=backdrop.firstElementChild,keep=dialog.querySelector('[data-keep-provider]');
+		dialog.addEventListener('keydown',e=>e.stopPropagation());
+		keep.onclick=()=>close(false);dialog.querySelector('[data-use-utaten]').onclick=()=>close(true);
+		backdrop.onclick=e=>{if(e.target===backdrop)close(false);};
+		providerNotices.set(doc,promise);doc.body.append(backdrop);doc.addEventListener('keydown',escape,true);keep.focus();return promise;
+	}
 	function mountSearchFallback(box, getTrack, openUrl) {
 		const doc = box.ownerDocument;
 		ensureStyle(doc);
@@ -111,5 +128,5 @@
 			copyTitle.disabled = !title.value; copyArtist.disabled = !artist.value;
 		};
 	}
-	return {open,confirmExternal,mountSearchFallback};
+	return {open,confirmExternal,recommendProvider,mountSearchFallback};
 });
