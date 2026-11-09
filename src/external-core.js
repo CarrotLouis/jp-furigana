@@ -423,7 +423,7 @@
 			if(resolved.size>=128)return null;
 			resolved.add(signature);
 			const segments=g.segments || fromRomaji && fromRomaji(g.text,g.romaji), prepared={...g,segments};
-			const sameText=at===0 && g.text===target && segments && segments.some(s=>s.rt);
+			const sameText=at===0 && g.text===target && segments && (segments.some(s=>s.rt)||!core.hasKanji(target)&&core.hasKatakana(target));
 			const result = !segments ? null : sameText ? segments.map(s=>s.rt?{...s,rt:writtenKana(s.rt,mode)}:{...s}) : mapped ? projectAligned(target, prepared, mode) : project(target, prepared, at, mode);
 			if (result && result.map(s => s.text).join('') === target) versions.set(JSON.stringify(result), result);
 			else return null;

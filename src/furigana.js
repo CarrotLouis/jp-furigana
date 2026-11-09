@@ -35,6 +35,46 @@
 	const RE_RUBY_BASE = new RegExp(`[0-9０-９]*[${KANJI}][${KANJI}ぁ-ゖァ-ヺー]*$`);
 	const RE_KANJI_BASE = new RegExp(`[0-9０-９]*[${KANJI}]+$`);
 	const RE_PAREN = /[（(][^（）()]*[）)]/g;
+	const KATAKANA = 'ァ-ヺヽヾヿㇰ-ㇿｦ-ﾟ';
+	const RE_KATAKANA = new RegExp(`[${KATAKANA}]`);
+	const RE_KATAKANA_RUN = new RegExp(`[${KATAKANA}ーｰ－-]+`, 'g');
+	const RE_KATAKANA_TAIL = new RegExp(`[${KATAKANA}ーｰ－-]+$`);
+	function englishReading(value) {
+		const text=String(value).normalize('NFKC').trim().replace(/\s+/g,' ');
+		return /[A-Za-z]/.test(text)&&/^[A-Za-z0-9 '’.,!?&:+/–—-]+$/.test(text)?text:null;
+	}
+	function latinRubyAt(text, match) {
+		const rt=englishReading(match[0].slice(1,-1));if(!rt||rt.length>256)return null;
+		const prefix=text.slice(0,match.index).replace(/\s+$/u,''),word=RE_KATAKANA_TAIL.exec(prefix);
+		return word&&RE_KATAKANA.test(word[0])?{from:word.index,mid:prefix.length,open:match.index,to:match.index+match[0].length,rt,script:'latin',confirmed:true}:null;
+	}
+	function latinRubyRanges(text) { return [...text.matchAll(RE_PAREN)].map(m=>latinRubyAt(text,m)).filter(Boolean); }
+	function splitEditableKatakana(segments) {
+		const out=[];
+		for(let s of segments) {
+			// Bare loanwords get no automatic ruby. A written English gloss or a
+			// manual edit is the opt-in; ordinary website kana must not add one.
+			if(s.rt&&!s.inlineLatin&&!s.edit&&RE_KATAKANA.test(s.text)&&RE_KATAKANA_TAIL.exec(s.text)?.index===0)s={text:s.text};
+			if(s.rt||s.hidden){out.push(s);continue;}
+			let cursor=0;
+			for(const m of s.text.matchAll(RE_KATAKANA_RUN)) {
+				if(!RE_KATAKANA.test(m[0]))continue;
+				if(m.index>cursor)out.push({text:s.text.slice(cursor,m.index)});
+				out.push({text:m[0],katakana:true});cursor=m.index+m[0].length;
+			}
+			if(cursor<s.text.length)out.push({text:s.text.slice(cursor)});
+		}
+		return out;
+	}
+	function withLatinRuby(segments,opts={}) {
+		if(!segments)return null;
+		const notes=latinRubyRanges(segments.map(s=>s.text).join(''));
+		const result=notes.length?applyRubyRanges(segments,notes,{...opts,preserveReadings:false}):segments;
+		return result&&splitEditableKatakana(result);
+	}
+	function literalSegments(segments) {
+		return segments.map(s=>{const p={...s};delete p.hidden;delete p.fixed;if(p.inlineLatin){delete p.rt;delete p.at;delete p.inlineLatin;}return p;});
+	}
 
 	function toHiragana(s) {
 		return s.replace(/[ァ-ヶ]/g, (c) =>
@@ -553,7 +593,7 @@
 		if (!candidates.length) return alignFromReading(text,reading,dictSegments,opts);
 		// A previous dictionary pass may have hidden a duplicate-looking chorus.
 		// Reconsider it with the whole supplied reading before hiding anything.
-		const literal=dictSegments.map(s=>{const p={...s};delete p.hidden;delete p.fixed;return p;});
+		const literal=literalSegments(dictSegments);
 		const notes=inlineRubyRanges(text,literal);
 		const selected=selectInlineVariant(literal,notes,reading,opts,true);
 		if(selected)return selected;
@@ -740,6 +780,8 @@
 		}
 		if (s.fixed) out.fixed = true;
 		if (s.inlineKana === 'katakana') out.inlineKana = 'katakana';
+		if (s.inlineLatin) out.inlineLatin = true;
+		if (s.katakana) out.katakana = true;
 		if (s.hidden) out.hidden = true;
 		if (s.num) out.num = s.num;
 		return out;
@@ -1044,7 +1086,7 @@
 			}
 		}
 
-		return opts.inlineRuby === false ? out : normalizeInlineRuby(out, opts);
+		return opts.inlineRuby === false ? splitEditableKatakana(out) : normalizeInlineRuby(out, opts);
 	}
 
 	// Ignore formatting differences only in pronunciation comparisons. All text
@@ -1059,7 +1101,7 @@
 	function segmentsFromDictionary(tokenizer,text,opts={}) {
 		const raw=tokensToSegments(tokenizeForReading(tokenizer,text),{...opts,inlineRuby:false});
 		const notes=inlineRubyRanges(text,raw);
-		if(notes.some(r=>!r.confirmed||readingBefore(raw,r.mid,r.rt,r.from)===null)&&text.length<=4096) {
+		if(notes.some(r=>r.script!=='latin'&&(!r.confirmed||readingBefore(raw,r.mid,r.rt,r.from)===null))&&text.length<=4096) {
 			const bases=new Map(inlineRubyRanges(text).map(r=>[r.mid,r.from]));
 			// YRC can interrupt an inflected word: 揺(ゆ)れる becomes a noun
 			// 揺(ゆら) if tokenized literally. Check the uninterrupted word first;
@@ -1083,6 +1125,7 @@
 			const location=at=>{let lo=0,hi=offsets.length;while(lo<hi){const mid=(lo+hi)>>1;if(offsets[mid]<at)lo=mid+1;else hi=mid;}return lo;};
 			let inflectionChecks=0;
 			for(const r of notes) {
+				if(r.script==='latin')continue;
 				const end=location(r.mid),start=readingBefore(context,end,r.rt,location(bases.get(r.mid)));
 				if(start===null) {
 					if(r.confirmed)continue; // Keep a deliberate special reading's full base.
@@ -1170,6 +1213,7 @@
 	function inlineRubyRanges(text, segments) {
 		const output=[],units=segments&&positioned(segments);
 		for(const m of text.matchAll(RE_PAREN)) {
+			const latin=latinRubyAt(text,m);if(latin){output.push(latin);continue;}
 			const written=m[0].slice(1,-1).normalize('NFKC').replace(/[\s・]/g,'');
 			const katakana=/^[ァ-ヺー]+$/.test(written)&&/[ァ-ヺ]/.test(written);
 			const rt=katakana?written:toHiragana(written);
@@ -1223,7 +1267,7 @@
 		for(const p of copySegments(segs,notes.flatMap(r=>preserve?[r.mid,r.to]:[r.from,r.mid,r.to]))) {
 			const r=notes.find(r=>p.start>=(preserve?r.mid:r.from)&&p.start<r.to);
 			if(!r)out.push(stripSegment(p));
-			else if(!preserve&&p.start===r.from)out.push({text:text.slice(r.from,r.mid),rt:r.script==='katakana'?toKatakana(r.rt):kanaFn(toKatakana(r.rt)),at:r.from,fixed:true,...(r.script==='katakana'?{inlineKana:'katakana'}:{})});
+			else if(!preserve&&p.start===r.from)out.push({text:text.slice(r.from,r.mid),rt:r.script==='latin'?r.rt:r.script==='katakana'?toKatakana(r.rt):kanaFn(toKatakana(r.rt)),at:r.from,fixed:true,...(r.script==='katakana'?{inlineKana:'katakana'}:r.script==='latin'?{inlineLatin:true,katakana:true}:{})});
 			else if(p.start===r.mid)out.push({text:text.slice(r.mid,r.to),hidden:true});
 		}
 		return out.map(s=>s.text).join('')===text?out:null;
@@ -1243,6 +1287,14 @@
 	}
 	function selectInlineVariant(segments, notes, reading, opts, align) {
 		const wanted=pronunciation(reading);if(!wanted)return null;
+		// English is a written gloss, not an additional sung pronunciation. Hide
+		// those parentheses for alignment, then restore their display ruby.
+		const latin=notes.filter(r=>r.script==='latin');notes=notes.filter(r=>r.script!=='latin');
+		if(latin.length) {
+			segments=applyRubyRanges(segments.map(s=>s.inlineLatin?{text:s.text,katakana:true}:s),latin,{preserveReadings:true});
+			if(!segments)return null;
+		}
+		const finish=result=>latin.length?withLatinRuby(result,opts):result;
 		const text=segments.map(s=>s.text).join(''),found=[];let best=Infinity;
 		for(const selected of inlineRubyVariants(notes)) {
 			if(selected.length>best)break;
@@ -1253,23 +1305,26 @@
 				result=alignFromReading(text,reading,draft,opts,false);
 				if(!result||!matchesReading(result,reading))continue;
 			}
-			if(!selected.length)return result; // the parentheses are sung: retain them
+			if(!selected.length)return finish(result); // the Japanese parentheses are sung: retain them
 			best=selected.length;found.push({selected,result});
 		}
 		if(!found.length)return null;
 		const common=found[0].selected.filter(r=>found.every(v=>v.selected.includes(r)));
 		// If equal readings fit different places, do not arbitrarily hide one.
-		return common.length===best?found[0].result:applyRubyRanges(segments,common,opts);
+		return finish(common.length===best?found[0].result:applyRubyRanges(segments,common,opts));
 	}
 	function resolveInlineRubyReading(segments,reading,opts={}) {
-		const literal=segments.map(s=>{const p={...s};delete p.hidden;delete p.fixed;return p;});
+		const literal=literalSegments(segments);
 		return selectInlineVariant(literal,inlineRubyRanges(literal.map(s=>s.text).join(''),literal),reading,opts,true);
 	}
 	function normalizeInlineRuby(segments, opts={}) {
+		return withLatinRuby(normalizeKanaRuby(segments,opts),opts);
+	}
+	function normalizeKanaRuby(segments, opts={}) {
 		const text=segments.map(s=>s.text).join('');if(!/[（(]/.test(text))return segments;
 		const units=positioned(segments);
 		const fallback=opts.proofSegments&&inlineRubyRanges(text,opts.proofSegments);
-		const notes=inlineRubyRanges(text,segments).map(r=>r.confirmed?r:fallback&&fallback.find(p=>p.confirmed&&p.mid===r.mid&&p.to===r.to)||r).filter(r=>
+		const notes=inlineRubyRanges(text,segments).filter(r=>r.script!=='latin').map(r=>r.confirmed?r:fallback&&fallback.find(p=>p.confirmed&&p.mid===r.mid&&p.to===r.to)||r).filter(r=>
 			opts.preferInline||!units.some(p=>p.s.hidden&&p.start<=r.mid&&p.end>=r.to));
 		if(!notes.length)return segments;
 		const finishOptions={...opts,preserveReadings:opts.preferInline?false:opts.preserveReadings};
@@ -1297,6 +1352,10 @@
 		KANJI_RANGE: KANJI,
 		LOOKUP_VARIANTS,
 		hasKanji: (s) => RE_HAS_KANJI.test(s),
+		hasKatakana: (s) => RE_KATAKANA.test(s),
+		englishReading,
+		latinRubyRanges,
+		splitEditableKatakana,
 		hasKana: (s) => RE_HAS_KANA.test(s),
 		toHiragana,
 		toKatakana,

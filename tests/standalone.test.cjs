@@ -28,7 +28,7 @@ async function fixture(conflict, late = false, desktopChoice) {
 		assert.equal(win.JPFuriganaPlus.config.rtSize, 74, 'Copy earlier user settings once');
 		assert.equal(win.JPFuriganaPlus.config.rtWeight, '400', 'Invalid stored weights fall back to normal');
 		assert.equal(win.JPFuriganaPlus.config.desktopEnabled,desktopChoice===undefined?true:desktopChoice,'Desktop defaults on while preserving an explicitly saved choice');
-		assert.equal(win.JPFuriganaPlus.config.configVersion,3);
+		assert.equal(win.JPFuriganaPlus.config.configVersion,4);
 		win.JPFuriganaPlus.set('rtSize', 81);
 		assert.equal(JSON.parse(win.localStorage.getItem('jp-furigana-plus.config')).rtSize, 81);
 		assert.equal(win.document.querySelector('#original').textContent, '原页面');

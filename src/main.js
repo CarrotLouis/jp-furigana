@@ -13,11 +13,11 @@
 
 	const LOG = '[jp-furigana-plus]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFuriganaPlus.build）
-	const BUILD = 'standalone-1.6.3-inline-ruby-priority';
+	const BUILD = 'standalone-1.6.3-latin-inline-provider-guidance';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana-plus.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
-	const CACHE_KEY = 'jp-furigana-plus.cache.v9';
+	const CACHE_KEY = 'jp-furigana-plus.cache.v10';
 	const CACHE_LIMIT = 4000;
 
 	const DEFAULTS = {
@@ -25,7 +25,8 @@
 		kana: 'hiragana', // hiragana | katakana
 		// romaji = 优先用网易云接口给的官方音译，拿不到或对不齐才退回词典；dict = 只用词典
 		readingSource: 'romaji',
-		externalProvider: 'auto', // UtaTen first, then Uta-Net
+		externalProvider: 'utaten', // First-time external users start with UtaTen only.
+		externalProviderNoticeSeen: true,
 		externalAutoRetry: 'failed', // off | failed (at most three transient-error retries per load)
 		externalProxyEnabled: false,
 		externalProxy: '',
@@ -69,7 +70,7 @@
 	// ------------------------------------------------------------------ 配置
 
 	// 改了某项默认值就 +1，让已经存过设置的用户也跟上（见 loadConfig）
-	const CONFIG_VERSION = 3;
+	const CONFIG_VERSION = 4;
 
 	function loadConfig() {
 		let saved = {};
@@ -91,6 +92,15 @@
 			/* 坏了就用默认值 */
 		}
 		const cfg = Object.assign({}, DEFAULTS, saved);
+		// Preserve an established provider choice; a saved old default alone does
+		// not prove the external feature was ever enabled.
+		if (!Object.prototype.hasOwnProperty.call(saved, 'externalProviderNoticeSeen')) {
+			const used = saved.externalConsent === true || saved.readingSource === 'external' || ['utaten','utanet'].includes(saved.externalProvider);
+			if (!used) cfg.externalProvider = 'utaten';
+			cfg.externalProviderNoticeSeen = !used || !['auto','utanet'].includes(cfg.externalProvider);
+			cfg.migrated = true;
+		}
+
 		if (!(saved.configVersion >= 2)) {
 			// v2：注音默认大一点
 			cfg.rtSize = DEFAULTS.rtSize;
@@ -209,7 +219,7 @@
 	const cache = new Map();
 	try {
 		localStorage.removeItem('jp-furigana-plus.cache.v3'); // obsolete results could include missing readings
-		for(const version of ['v4','v5','v6','v7','v8'])localStorage.removeItem(CACHE_KEY.replace(/v9$/,version));
+		for(const version of ['v4','v5','v6','v7','v8','v9'])localStorage.removeItem(CACHE_KEY.replace(/v10$/,version));
 		const raw = JSON.parse(localStorage.getItem(CACHE_KEY));
 		if (raw && typeof raw === 'object')
 			for (const k of Object.keys(raw)) cache.set(k, raw[k]);
@@ -582,6 +592,7 @@
 	}
 	function ensureExternal() {
 		if (config.readingSource !== 'external' || editPreparing) return;
+		if (!config.externalProviderNoticeSeen) { ensureProviderRecommendation().then(() => schedule(0)); return; }
 		// 旧版本里已经选了外部网站、但还没看过提示的，先确认再联网
 		if (!config.externalConsent) {
 			ensureExternalConsent().then(ok => { if (ok) schedule(0); else if (config.readingSource === 'external') setConfigValue('readingSource', 'romaji'); });
@@ -939,12 +950,13 @@
 	function groupHosts(hosts, lens, segments) {
 		// 落在注音词内部的位置 = 不能从这里切开
 		const unsafe = new Set();
+		const fullKatakana = new Set();
 		let p = 0;
 		for (const seg of segments) {
 			const start = p;
 			p += seg.text.length;
-			if (!seg.rt) continue;
-			for (let i = start + 1; i < p; i++) unsafe.add(i);
+			if (!seg.rt && !seg.edit) continue;
+			for (let i = start + 1; i < p; i++) { unsafe.add(i); if(seg.katakana)fullKatakana.add(i); }
 		}
 
 		const groups = [];
@@ -955,7 +967,7 @@
 			cur.hosts.push(hosts[i]);
 			pos += lens[i];
 			cur.to = pos;
-			const straddles = unsafe.has(pos) && cur.to - cur.from < MAX_MERGE;
+			const straddles = unsafe.has(pos) && (cur.to - cur.from < MAX_MERGE || fullKatakana.has(pos));
 			if (straddles && i < hosts.length - 1) continue; // 切在词中间，把下一个也并进来
 			groups.push(cur);
 			cur = null;
@@ -1044,7 +1056,7 @@
 			segments = externalClient.segments(text, config.kana, getSegmentsFromRomaji);
 			if (segments) source = 'external';
 		}
-		if(!segments && !FuriganaPlusCore.hasKanji(text))return {segments:[{text}],source:null};
+		if(!segments && !FuriganaPlusCore.hasKanji(text) && !FuriganaPlusCore.hasKatakana(text))return {segments:[{text}],source:null};
 		if (!segments && (config.readingSource === 'romaji' || config.readingSource === 'external') && state.apiRomaji) {
 			const romaji = getRomaji(text);
 			if (romaji) { segments = getSegmentsFromRomaji(text, romaji); if (segments) source = 'romaji'; }
@@ -1068,7 +1080,7 @@
 			line.__fgHosts = [];
 			return false;
 		}
-		if (!FuriganaPlusCore.hasKanji(text) && config.readingSource !== 'external') {
+		if (!FuriganaPlusCore.hasKanji(text) && !FuriganaPlusCore.hasKatakana(text) && config.readingSource !== 'external') {
 			line.__fgText = text;
 			line.__fgHosts = [];
 			return false;
@@ -1738,6 +1750,18 @@
 		notifyConfigUI();
 		return config[key];
 	}
+	let providerNoticePending = null;
+	function ensureProviderRecommendation() {
+		if (config.externalProviderNoticeSeen) return Promise.resolve();
+		if (config.externalProvider === 'utaten') { config.externalProviderNoticeSeen = true; saveConfig(); return Promise.resolve(); }
+		if (!providerNoticePending) providerNoticePending = FuriganaPlusSourceDialog.recommendProvider().then(useUtaten => {
+			config.externalProviderNoticeSeen = true;
+			if (useUtaten) setConfigValue('externalProvider','utaten');
+			else { saveConfig(); notifyConfigUI(); }
+			providerNoticePending = null;
+		});
+		return providerNoticePending;
+	}
 	let consentPending = null;
 	function ensureExternalConsent() {
 		if (config.externalConsent) return Promise.resolve(true);
@@ -2000,10 +2024,11 @@
 				<div class="fg-hint">外部来源会联网获取并在本地保存歌词，请遵守来源网站使用条款。<a href="#" data-open="https://utaten.com/index/agreement">UtaTen 条款</a> · <a href="#" data-open="https://www.uta-net.com/info/kiyaku.html">歌ネット条款</a></div>
 				<h3>外部歌词</h3>
 				<div class="fg-row"><label>外部网站范围</label><select data-k="externalProvider">
-					<option value="auto">UtaTen 优先，歌ネット备用（推荐）</option>
-					<option value="utaten">仅查询 UtaTen 振假名</option>
+					<option value="auto">UtaTen 优先，歌ネット备用</option>
+					<option value="utaten">仅查询 UtaTen 振假名（推荐）</option>
 					<option value="utanet">仅查询歌ネット罗马音</option>
 				</select></div>
+				<div class="fg-hint" data-provider-warning hidden>uta-Net的注音质量较低，建议仅使用UtaTen进行注音</div>
 				<div class="fg-row"><label>自动重新获取</label><select data-k="externalAutoRetry">
 					<option value="off">关闭（仍会首次获取）</option>
 					<option value="failed">失败后自动重试（最多 3 次）</option>
@@ -2089,6 +2114,7 @@
 			for (const key of ['desktopTopmost','desktopTranslation','desktopFontSize']) root.querySelector('[data-k="'+key+'"]').disabled = !config.desktopEnabled || config.desktopInheritStyle;
 			const section = root.querySelector('.fg-external-settings');
 			section.hidden = config.readingSource !== 'external';
+			root.querySelector('[data-provider-warning]').hidden = config.externalProvider === 'utaten';
 			root.querySelector('.fg-consent-row').hidden = !config.externalConsent;
 			const info = externalClient && externalClient.inspect();
 			const externalStatus = root.querySelector('.fg-external-status'), text = externalStatusText();
@@ -2251,6 +2277,7 @@
 			/* 只是给 probe 看的，拿不到就算了 */
 		}
 		updateStyles();
+		ensureProviderRecommendation();
 		startObserver();
 		if (config.enabled) loadTokenizer();
 		if (typeof FuriganaPlusEditor !== 'undefined') editor = FuriganaPlusEditor.install({

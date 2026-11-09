@@ -5,9 +5,10 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (core) {
 	'use strict';
 	const canonical = value => core.kana(value, 'hiragana');
+	const acceptable = (s,max,empty=false) => typeof s==='string'&&s.length<=max&&(empty&&!s.length||s.length>0&&(/^[ぁ-ゖァ-ヶー]+$/.test(s)||/^[ぁ-ゖァ-ヶーA-Za-z0-9 '’.,!?&:+/–—-]+$/.test(s)&&/[A-Za-z]/.test(s)));
 	function reading(value) {
 		const text = String(value).trim().normalize('NFKC');
-		if (!/^[ぁ-ゖァ-ヶー]{1,1000}$/.test(text)) throw new Error('请输入 1–1000 个平假名或片假名（可含长音符）');
+		if (!acceptable(text,1000)) throw new Error('请输入 1–1000 个假名或英文字母（可含空格、长音符和常用英文标点）');
 		return text;
 	}
 	const key = a => JSON.stringify([a.provider, a.url, a.line, a.start, a.text, a.original]);
@@ -16,8 +17,7 @@
 		return a && (a.provider === 'local' ? a.url === '' : ['utaten', 'utanet'].includes(a.provider) && core.allowedURL(a.url)) &&
 			typeof a.line === 'string' && a.line.length <= 12000 && Number.isInteger(a.start) && a.start >= 0 &&
 			typeof a.text === 'string' && a.text.length > 0 && a.line.slice(a.start, a.start + a.text.length) === a.text &&
-			typeof a.original === 'string' && /^[ぁ-ゖァ-ヶー]{0,12000}$/.test(a.original) &&
-			typeof a.reading === 'string' && /^[ぁ-ゖァ-ヶー]{1,1000}$/.test(a.reading);
+			acceptable(a.original,12000,true) && acceptable(a.reading,1000);
 	}
 	const items = record => Array.isArray(record.userEdits) ? record.userEdits.filter(valid) : [];
 	function annotate(record, text, segments, mode, onApplied) {
@@ -29,7 +29,7 @@
 		let start = 0;
 		return segments.map(seg => {
 			const at = start; start += seg.text.length;
-			if (!seg.rt && (record.provider !== 'local' || !/[一-龯々]/.test(seg.text))) return seg;
+			if (seg.hidden || !seg.rt && !seg.katakana && (record.provider !== 'local' || !/[一-龯々]/.test(seg.text))) return seg;
 			let anchor = { provider: record.provider, url: record.url, line: text, start: at, text: seg.text, original: canonical(seg.rt || '') };
 			const edit = edits.get(key(anchor)) || (seg.fixed && positions.get(positionKey(anchor))) || (record.provider !== 'local' && local.get(JSON.stringify([text, at, seg.text])));
 			if (edit && onApplied) onApplied(edit);
