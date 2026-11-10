@@ -162,11 +162,11 @@
 			backdrop.innerHTML = '<section class="fg-edit-ui fg-cache-manager" role="dialog" aria-modal="true" aria-label="本地歌词管理"><div class="fg-cache-header"><div class="fg-cache-title" role="heading" aria-level="2">本地歌词管理</div><button type="button" data-refresh>刷新</button><button type="button" data-close>关闭</button></div><div class="fg-cache-tools"><input data-search aria-label="搜索缓存歌词" placeholder="歌名、歌手或歌曲 ID"><label><input data-modified type="checkbox"> 仅已修改</label></div><div data-summary role="status"></div><div role="alert"></div><div class="fg-cache-list"></div></section>';
 			doc.body.append(backdrop); manager = backdrop;
 			const box = backdrop.firstElementChild, list = box.querySelector('.fg-cache-list'), search = box.querySelector('[data-search]'), error = box.querySelector('[role=alert]'), summary = box.querySelector('[data-summary]');
-			let rows = [], limit = 50, revision = 0, dir = '';
+			let rows = [], limit = 50, revision = 0, loadRevision = 0, loading = false, dir = '';
 			const previousFocus = doc.activeElement;
 			const close = () => {
 				if (manager !== backdrop) return;
-				revision++; doc.removeEventListener('keydown', managerKeys, true); backdrop.remove(); manager = null; closeManager = null;
+				revision++; loadRevision++; doc.removeEventListener('keydown', managerKeys, true); backdrop.remove(); manager = null; closeManager = null;
 				if (previousFocus && previousFocus.isConnected) previousFocus.focus();
 			};
 			closeManager = close;
@@ -220,7 +220,7 @@
 				list.replaceChildren();
 				const query = search.value.trim().toLowerCase();
 				const shown = rows.filter(r => (!box.querySelector('[data-modified]').checked || r.edits) && [r.title, ...r.artists, r.songId].join(' ').toLowerCase().includes(query));
-				summary.textContent = rows.length + ' 首 · ' + bytes(rows.reduce((n, r) => n + r.bytes, 0)) + (rows.some(r => r.invalid) ? '（不含无法读取的文件）' : '') + ' · 已修改 ' + rows.filter(r => r.edits).length + ' 首 · 显示 ' + shown.length + ' 首\n' + dir;
+				summary.textContent = loading && !rows.length ? '读取本地缓存…' : (loading ? '读取本地缓存…\n' : '') + rows.length + ' 首 · ' + bytes(rows.reduce((n, r) => n + r.bytes, 0)) + (rows.some(r => r.invalid) ? '（不含无法读取的文件）' : '') + ' · 已修改 ' + rows.filter(r => r.edits).length + ' 首 · 显示 ' + shown.length + ' 首\n' + dir;
 				for (const row of shown.slice(0, limit)) {
 					const el = doc.createElement('div'); el.className = 'fg-cache-row';
 					const info = doc.createElement('div'); info.className = 'fg-cache-info'; info.textContent = row.title;
@@ -255,12 +255,14 @@
 					list.append(el);
 				}
 				if (shown.length > limit) list.append(button('显示更多', () => { limit += 50; render(); }));
-				if (!shown.length) { const p = doc.createElement('p'); p.textContent = '没有符合条件的缓存歌词'; list.append(p); }
+				if (!shown.length) { const p = doc.createElement('p'); p.textContent = loading ? '正在读取本地缓存…' : '没有符合条件的缓存歌词'; list.append(p); }
 			}
 			async function refresh() {
-				const token = ++revision; summary.textContent = '读取本地缓存…'; error.textContent = '';
-				try { const result = await api.list(); if (manager !== backdrop || token !== revision) return; rows = result.rows; dir = result.dir; limit = 50; render(); }
-				catch (e) { if (manager === backdrop) { summary.textContent = ''; error.textContent = e.message; } }
+				// Filters invalidate detail views, but must not discard an in-flight
+				// directory scan. Only a newer scan or closing this manager does that.
+				const token = ++loadRevision; loading = true; error.textContent = ''; render();
+				try { const result = await api.list(); if (manager !== backdrop || token !== loadRevision) return; rows = result.rows; dir = result.dir; limit = 50; loading = false; render(); }
+				catch (e) { if (manager === backdrop && token === loadRevision) { loading = false; error.textContent = e.message; render(); } }
 			}
 			box.querySelector('[data-refresh]').onclick = refresh;
 			search.oninput = () => { limit = 50; render(); }; box.querySelector('[data-modified]').onchange = render;
