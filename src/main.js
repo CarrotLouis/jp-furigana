@@ -13,7 +13,7 @@
 
 	const LOG = '[jp-furigana-plus]';
 	// 改了实现就换一下，方便确认插件到底有没有被重新加载（JPFuriganaPlus.build）
-	const BUILD = 'standalone-1.6.3-latin-inline-provider-guidance';
+	const BUILD = 'standalone-1.6.3-latin-baseline';
 	const REPO_URL = 'https://github.com/CarrotLouis/jp-furigana';
 	const CONFIG_KEY = 'jp-furigana-plus.config';
 	// 注音算法改了就换 key，让旧缓存自然失效
@@ -893,6 +893,7 @@
 				}
 				const annotation = holder.querySelector('.fg-rt'); annotation.textContent = '';
 				const stack = document.createElement('span'); stack.className = 'fg-edit-stack';
+				if (/[A-Za-z]/.test((seg.rt || '') + (seg.originalRt || ''))) stack.classList.add('fg-latin-stack');
 				const current = document.createElement('span'); current.className = 'fg-reading'; current.textContent = seg.rt || '';
 				stack.append(current);
 				if (seg.originalRt != null) {
@@ -1642,6 +1643,9 @@
 				-webkit-user-select: none;
 				white-space: nowrap;
 			}
+			/* Reserve descender clearance inside the measured ruby box. This lifts
+			 * Latin glyphs without transforms that the line calibrator can undo. */
+			.fg-rt .fg-latin-stack { padding-bottom: .18em; }
 		`;
 	}
 
